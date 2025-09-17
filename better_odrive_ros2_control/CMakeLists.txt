@@ -20,14 +20,14 @@ ament_auto_add_library(
   better_odrive_ros2_control_plugin SHARED
   ../odrive_base/src/epoll_event_loop.cpp
   ../odrive_base/src/socket_can.cpp
-  src/odrive_hardware_interface.cpp
+  src/better_odrive_hardware_interface.cpp
 )
 
 ament_target_dependencies(better_odrive_ros2_control_plugin
   rclcpp
 )
 
-pluginlib_export_plugin_description_file(hardware_interface odrive_hardware_interface.xml)
+pluginlib_export_plugin_description_file(hardware_interface better_odrive_hardware_interface.xml)
 
 target_compile_features(better_odrive_ros2_control_plugin PRIVATE cxx_std_20)
 

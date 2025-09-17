@@ -8,11 +8,11 @@
 #include "rclcpp/rclcpp.hpp"
 #include "socket_can.hpp"
 
-namespace odrive_ros2_control {
+namespace better_odrive_ros2_control {
 
 class Axis;
 
-class ODriveHardwareInterface final : public hardware_interface::SystemInterface {
+class BetterODriveHardwareInterface final : public hardware_interface::SystemInterface {
 public:
     using return_type = hardware_interface::return_type;
     using State = rclcpp_lifecycle::State;
@@ -98,14 +98,14 @@ struct Axis {
     }
 };
 
-} // namespace odrive_ros2_control
+} // namespace better_odrive_ros2_control
 
-using namespace odrive_ros2_control;
+using namespace better_odrive_ros2_control;
 
 using hardware_interface::CallbackReturn;
 using hardware_interface::return_type;
 
-CallbackReturn ODriveHardwareInterface::on_init(const hardware_interface::HardwareInfo& info) {
+CallbackReturn BetterODriveHardwareInterface::on_init(const hardware_interface::HardwareInfo& info) {
     if (hardware_interface::SystemInterface::on_init(info) != CallbackReturn::SUCCESS) {
         return CallbackReturn::ERROR;
     }
@@ -119,30 +119,30 @@ CallbackReturn ODriveHardwareInterface::on_init(const hardware_interface::Hardwa
     return CallbackReturn::SUCCESS;
 }
 
-CallbackReturn ODriveHardwareInterface::on_configure(const State&) {
-    if (!can_intf_.init(can_intf_name_, &event_loop_, std::bind(&ODriveHardwareInterface::on_can_msg, this, _1))) {
-        RCLCPP_ERROR(rclcpp::get_logger("ODriveHardwareInterface"), "Failed to initialize SocketCAN on %s", can_intf_name_.c_str());
+CallbackReturn BetterODriveHardwareInterface::on_configure(const State&) {
+    if (!can_intf_.init(can_intf_name_, &event_loop_, std::bind(&BetterODriveHardwareInterface::on_can_msg, this, _1))) {
+        RCLCPP_ERROR(rclcpp::get_logger("BetterODriveHardwareInterface"), "Failed to initialize SocketCAN on %s", can_intf_name_.c_str());
         return CallbackReturn::ERROR;
     }
-    RCLCPP_INFO(rclcpp::get_logger("ODriveHardwareInterface"), "Initialized SocketCAN on %s", can_intf_name_.c_str());
+    RCLCPP_INFO(rclcpp::get_logger("BetterODriveHardwareInterface"), "Initialized SocketCAN on %s", can_intf_name_.c_str());
     return CallbackReturn::SUCCESS;
 }
 
-CallbackReturn ODriveHardwareInterface::on_cleanup(const State&) {
+CallbackReturn BetterODriveHardwareInterface::on_cleanup(const State&) {
     can_intf_.deinit();
     return CallbackReturn::SUCCESS;
 }
 
-CallbackReturn ODriveHardwareInterface::on_activate(const State&) {
-    RCLCPP_INFO(rclcpp::get_logger("ODriveHardwareInterface"), "activating ODrives...");
+CallbackReturn BetterODriveHardwareInterface::on_activate(const State&) {
+    RCLCPP_INFO(rclcpp::get_logger("BetterODriveHardwareInterface"), "activating ODrives...");
 
     // This can be called several seconds before the controller finishes starting.
     // Therefore we enable the ODrives only in perform_command_mode_switch().
     return CallbackReturn::SUCCESS;
 }
 
-CallbackReturn ODriveHardwareInterface::on_deactivate(const State&) {
-    RCLCPP_INFO(rclcpp::get_logger("ODriveHardwareInterface"), "deactivating ODrives...");
+CallbackReturn BetterODriveHardwareInterface::on_deactivate(const State&) {
+    RCLCPP_INFO(rclcpp::get_logger("BetterODriveHardwareInterface"), "deactivating ODrives...");
 
     for (auto& axis : axes_) {
         Set_Axis_State_msg_t msg;
@@ -153,7 +153,7 @@ CallbackReturn ODriveHardwareInterface::on_deactivate(const State&) {
     return CallbackReturn::SUCCESS;
 }
 
-std::vector<hardware_interface::StateInterface> ODriveHardwareInterface::export_state_interfaces() {
+std::vector<hardware_interface::StateInterface> BetterODriveHardwareInterface::export_state_interfaces() {
     std::vector<hardware_interface::StateInterface> state_interfaces;
 
     for (size_t i = 0; i < info_.joints.size(); i++) {
@@ -177,7 +177,7 @@ std::vector<hardware_interface::StateInterface> ODriveHardwareInterface::export_
     return state_interfaces;
 }
 
-std::vector<hardware_interface::CommandInterface> ODriveHardwareInterface::export_command_interfaces() {
+std::vector<hardware_interface::CommandInterface> BetterODriveHardwareInterface::export_command_interfaces() {
     std::vector<hardware_interface::CommandInterface> command_interfaces;
 
     for (size_t i = 0; i < info_.joints.size(); i++) {
@@ -201,7 +201,7 @@ std::vector<hardware_interface::CommandInterface> ODriveHardwareInterface::expor
     return command_interfaces;
 }
 
-return_type ODriveHardwareInterface::perform_command_mode_switch(
+return_type BetterODriveHardwareInterface::perform_command_mode_switch(
     const std::vector<std::string>& start_interfaces,
     const std::vector<std::string>& stop_interfaces
 ) {
@@ -236,15 +236,15 @@ return_type ODriveHardwareInterface::perform_command_mode_switch(
         if (mode_switch) {
             Set_Controller_Mode_msg_t msg;
             if (axis.pos_input_enabled_) {
-                RCLCPP_INFO(rclcpp::get_logger("ODriveHardwareInterface"), "Setting %s to position control", info_.joints[i].name.c_str());
+                RCLCPP_INFO(rclcpp::get_logger("BetterODriveHardwareInterface"), "Setting %s to position control", info_.joints[i].name.c_str());
                 msg.Control_Mode = CONTROL_MODE_POSITION_CONTROL;
                 msg.Input_Mode = INPUT_MODE_PASSTHROUGH;
             } else if (axis.vel_input_enabled_) {
-                RCLCPP_INFO(rclcpp::get_logger("ODriveHardwareInterface"), "Setting %s to velocity control", info_.joints[i].name.c_str());
+                RCLCPP_INFO(rclcpp::get_logger("BetterODriveHardwareInterface"), "Setting %s to velocity control", info_.joints[i].name.c_str());
                 msg.Control_Mode = CONTROL_MODE_VELOCITY_CONTROL;
                 msg.Input_Mode = INPUT_MODE_PASSTHROUGH;
             } else {
-                RCLCPP_INFO(rclcpp::get_logger("ODriveHardwareInterface"), "Setting %s to torque control", info_.joints[i].name.c_str());
+                RCLCPP_INFO(rclcpp::get_logger("BetterODriveHardwareInterface"), "Setting %s to torque control", info_.joints[i].name.c_str());
                 msg.Control_Mode = CONTROL_MODE_TORQUE_CONTROL;
                 msg.Input_Mode = INPUT_MODE_PASSTHROUGH;
             }
@@ -270,7 +270,7 @@ return_type ODriveHardwareInterface::perform_command_mode_switch(
     return return_type::OK;
 }
 
-return_type ODriveHardwareInterface::read(const rclcpp::Time& timestamp, const rclcpp::Duration&) {
+return_type BetterODriveHardwareInterface::read(const rclcpp::Time& timestamp, const rclcpp::Duration&) {
     timestamp_ = timestamp;
 
     while (can_intf_.read_nonblocking()) {
@@ -280,7 +280,7 @@ return_type ODriveHardwareInterface::read(const rclcpp::Time& timestamp, const r
     return return_type::OK;
 }
 
-return_type ODriveHardwareInterface::write(const rclcpp::Time&, const rclcpp::Duration&) {
+return_type BetterODriveHardwareInterface::write(const rclcpp::Time&, const rclcpp::Duration&) {
     for (auto& axis : axes_) {
         // Send the CAN message that fits the set of enabled setpoints
         if (axis.pos_input_enabled_) {
@@ -306,7 +306,7 @@ return_type ODriveHardwareInterface::write(const rclcpp::Time&, const rclcpp::Du
     return return_type::OK;
 }
 
-void ODriveHardwareInterface::on_can_msg(const can_frame& frame) {
+void BetterODriveHardwareInterface::on_can_msg(const can_frame& frame) {
     for (auto& axis : axes_) {
         if ((frame.can_id >> 5) == axis.node_id_) {
             axis.on_can_msg(timestamp_, frame);
@@ -319,7 +319,7 @@ void Axis::on_can_msg(const rclcpp::Time&, const can_frame& frame) {
 
     auto try_decode = [&]<typename TMsg>(TMsg& msg) {
         if (frame.can_dlc < Get_Encoder_Estimates_msg_t::msg_length) {
-            RCLCPP_WARN(rclcpp::get_logger("ODriveHardwareInterface"), "message %d too short", cmd);
+            RCLCPP_WARN(rclcpp::get_logger("BetterODriveHardwareInterface"), "message %d too short", cmd);
             return false;
         }
         msg.decode_buf(frame.data);
@@ -343,4 +343,4 @@ void Axis::on_can_msg(const rclcpp::Time&, const can_frame& frame) {
     }
 }
 
-PLUGINLIB_EXPORT_CLASS(odrive_ros2_control::ODriveHardwareInterface, hardware_interface::SystemInterface)
+PLUGINLIB_EXPORT_CLASS(better_odrive_ros2_control::BetterODriveHardwareInterface, hardware_interface::SystemInterface)
