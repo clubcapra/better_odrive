@@ -12,10 +12,15 @@ namespace better_odrive_ros2_control {
 
 class Axis;
 
+using trigger_command = double;
+using uint32_state = double;
+using uint8_state = double;
+
 class BetterODriveHardwareInterface final : public hardware_interface::SystemInterface {
 public:
     using return_type = hardware_interface::return_type;
     using State = rclcpp_lifecycle::State;
+
 
     CallbackReturn on_init(const hardware_interface::HardwareInfo& info) override;
     CallbackReturn on_configure(const State& previous_state) override;
@@ -42,6 +47,7 @@ private:
     std::string can_intf_name_;
     SocketCanIntf can_intf_;
     rclcpp::Time timestamp_;
+    double estop_timeout_ = 1.0;
 };
 
 struct Axis {
@@ -53,30 +59,46 @@ struct Axis {
 
     SocketCanIntf* can_intf_;
     uint32_t node_id_;
+    rclcpp::Time last_estop_timestamp_;
 
     // Commands (ros2_control => ODrives)
-    double pos_setpoint_ = 0.0f; // [rad]
-    double vel_setpoint_ = 0.0f; // [rad/s]
-    double torque_setpoint_ = 0.0f; // [Nm]
+    double pos_setpoint_ = 0.0; // [rad]
+    double vel_setpoint_ = 0.0; // [rad/s]
+    double torque_setpoint_ = 0.0; // [Nm]
+    double estop_ = -1.0;
+    trigger_command clear_errors_cmd_ = 0.0;
+    double set_absolute_pos_ = 0.0; // [rad]
+    trigger_command set_absolute_pos_cmd_ = 0.0;
 
     // State (ODrives => ros2_control)
-    rclcpp::Time encoder_estimates_timestamp_;
-    uint32_t axis_error_ = 0;
-    uint8_t axis_state_ = 0;
-    uint8_t procedure_result_ = 0;
-    uint8_t trajectory_done_flag_ = 0;
+    uint32_state axis_error_ = 0;
+    uint8_state axis_state_ = 0;
+    uint8_state procedure_result_ = 0;
+    uint8_state trajectory_done_flag_ = 0;
     double pos_estimate_ = NAN; // [rad]
     double vel_estimate_ = NAN; // [rad/s]
     double iq_setpoint_ = NAN;
     double iq_measured_ = NAN;
     double torque_target_ = NAN; // [Nm]
     double torque_estimate_ = NAN; // [Nm]
-    uint32_t active_errors_ = 0;
-    uint32_t disarm_reason_ = 0;
-    double fet_temperature_ = NAN;
-    double motor_temperature_ = NAN;
-    double bus_voltage_ = NAN;
-    double bus_current_ = NAN;
+    uint32_state active_errors_ = 0;
+    uint32_state disarm_reason_ = 0;
+    double fet_temperature_ = NAN; // [C]
+    double motor_temperature_ = NAN; // [C]
+    double bus_voltage_ = NAN; // [V]
+    double bus_current_ = NAN; // [A]
+    double electrical_power_ = NAN; // [W]
+    double mechanical_power_ = NAN; // [W]
+
+    uint8_state protocol_version_ = 0;
+    uint8_state hw_version_major_ = 0;
+    uint8_state hw_version_minor_ = 0;
+    uint8_state hw_version_variant_ = 0;
+    uint8_state fw_version_major_ = 0;
+    uint8_state fw_version_minor_ = 0;
+    uint8_state fw_version_revision_ = 0;
+    uint8_state fw_version_unreleased_ = 0;
+
 
     // Indicates which controller inputs are enabled. This is configured by the
     // controller that sits on top of this hardware interface. Multiple inputs
@@ -86,6 +108,85 @@ struct Axis {
     bool pos_input_enabled_ = false;
     bool vel_input_enabled_ = false;
     bool torque_input_enabled_ = false;
+
+    /**
+     * @brief Set the axis state
+     * 
+     * @param state Requested axis state
+     */
+    void send_axis_state(const ODriveAxisState& state);
+    /**
+     * @brief Set the controller mode 
+     * 
+     * @param control Requested controller mode
+     * @param input Requested input mode
+     */
+    void send_controller_mode(const ODriveControlMode& control, const ODriveInputMode& input);
+    /**
+     * @brief Clear errors
+     * 
+     * @param identify Set to 1 to flash the status led
+     */
+    void send_clear_errors(const uint8_t& identify = 0);
+    /**
+     * @brief Set the input position
+     * 
+     * @param input_pos Setpoint [rad]
+     * @param velocity_feed_forward Feed forward velocity [rad/s]. 0 to use configured max
+     * @param torque_feed_forward Feed forward torque [Nm]. 0 to use configured max
+     */
+    void send_input_pos(const double& input_pos, const double& velocity_feed_forward = 0, const double& torque_feed_forward = 0);
+    /**
+     * @brief Set the input velocity
+     * 
+     * @param velocity Setpoint [rad/s]
+     * @param torque_feed_forward Feed forward torque [Nm]. 0 to use configured max
+     */
+    void send_input_vel(const double& velocity, const double& torque_feed_forward = 0);
+    /**
+     * @brief Set the input torque
+     * 
+     * @param torque Setpoint [Nm]
+     */
+    void send_input_torque(const double& torque);
+    /**
+     * @brief Set the E-Stop state
+     * 
+     * @param estop E-Stop state
+     */
+    void send_estop_state(const bool& estop);
+    /**
+     * @brief Set the absolute position
+     * 
+     * @param position Actual position [rad]
+     */
+    void send_absolute_position(const double& position);
+    /**
+     * @brief Set the velocity and current limits
+     * 
+     * @param velocity_limit Velocity limit [rad/s]
+     * @param current_limit Current limit [A]
+     */
+    void send_limits(const double& velocity_limit, const double& current_limit);
+    /**
+     * @brief Set the trajectory velocity limit
+     * 
+     * @param limit Velocity limit [rad/s]
+     */
+    void send_trajectory_vel_limit(const double& limit);
+    /**
+     * @brief Set the trajectory accel/decel limits
+     * 
+     * @param accel_limit Acceleration limit [rad/s^2]
+     * @param decel_limit Deceleration limit [rad/s^2]
+     */
+    void send_trajectory_accel_limits(const double& accel_limit, const double& decel_limit);
+    /**
+     * @brief Set the trajectory inertia
+     * 
+     * @param inertia Inertia [Nm/(rad/s^2)]
+     */
+    void send_trajectory_inertia(const double& inertia);
 
     template <typename T>
     void send(const T& msg) {
@@ -145,9 +246,7 @@ CallbackReturn BetterODriveHardwareInterface::on_deactivate(const State&) {
     RCLCPP_INFO(rclcpp::get_logger("BetterODriveHardwareInterface"), "deactivating ODrives...");
 
     for (auto& axis : axes_) {
-        Set_Axis_State_msg_t msg;
-        msg.Axis_Requested_State = AXIS_STATE_IDLE;
-        axis.send(msg);
+        axis.send_axis_state(ODriveAxisState::AXIS_STATE_IDLE);
     }
 
     return CallbackReturn::SUCCESS;
@@ -172,6 +271,81 @@ std::vector<hardware_interface::StateInterface> BetterODriveHardwareInterface::e
             hardware_interface::HW_IF_POSITION,
             &axes_[i].pos_estimate_
         ));
+        state_interfaces.emplace_back(
+            info_.joints[i].name,
+            "bus_voltage",
+            &axes_[i].bus_voltage_
+        );
+        state_interfaces.emplace_back(
+            info_.joints[i].name,
+            "bus_current",
+            &axes_[i].bus_current_
+        );
+        state_interfaces.emplace_back(
+            info_.joints[i].name,
+            "active_errors",
+            &axes_[i].active_errors_
+        );
+        state_interfaces.emplace_back(
+            info_.joints[i].name,
+            "disarm_reason",
+            &axes_[i].disarm_reason_
+        );
+        state_interfaces.emplace_back(
+            info_.joints[i].name,
+            "axis_state",
+            &axes_[i].axis_state_
+        );
+        state_interfaces.emplace_back(
+            info_.joints[i].name,
+            "axis_error",
+            &axes_[i].axis_error_
+        );
+        state_interfaces.emplace_back(
+            info_.joints[i].name,
+            "electrical_power",
+            &axes_[i].electrical_power_
+        );
+        state_interfaces.emplace_back(
+            info_.joints[i].name,
+            "fet_temperature",
+            &axes_[i].fet_temperature_
+        );
+        state_interfaces.emplace_back(
+            info_.joints[i].name,
+            "iq_measured",
+            &axes_[i].iq_measured_
+        );
+        state_interfaces.emplace_back(
+            info_.joints[i].name,
+            "iq_setpoint",
+            &axes_[i].iq_setpoint_
+        );
+        state_interfaces.emplace_back(
+            info_.joints[i].name,
+            "mechanical_power",
+            &axes_[i].mechanical_power_
+        );
+        state_interfaces.emplace_back(
+            info_.joints[i].name,
+            "motor_temperature",
+            &axes_[i].motor_temperature_
+        );
+        state_interfaces.emplace_back(
+            info_.joints[i].name,
+            "procedure_result",
+            &axes_[i].procedure_result_
+        );
+        state_interfaces.emplace_back(
+            info_.joints[i].name,
+            "torque_target",
+            &axes_[i].torque_target_
+        );
+        state_interfaces.emplace_back(
+            info_.joints[i].name,
+            "trajectory_done_flag",
+            &axes_[i].trajectory_done_flag_
+        );
     }
 
     return state_interfaces;
@@ -196,6 +370,26 @@ std::vector<hardware_interface::CommandInterface> BetterODriveHardwareInterface:
             hardware_interface::HW_IF_POSITION,
             &axes_[i].pos_setpoint_
         ));
+        command_interfaces.emplace_back(
+            info_.joints[i].name,
+            "set_absolute_pos",
+            &axes_[i].set_absolute_pos_
+        );
+        command_interfaces.emplace_back(
+            info_.joints[i].name,
+            "set_absolute_pos_cmd",
+            &axes_[i].set_absolute_pos_cmd_
+        );
+        command_interfaces.emplace_back(
+            info_.joints[i].name,
+            "clear_errors_cmd",
+            &axes_[i].clear_errors_cmd_
+        );
+        command_interfaces.emplace_back(
+            info_.joints[i].name,
+            "estop",
+            &axes_[i].estop_
+        );
     }
 
     return command_interfaces;
@@ -234,36 +428,32 @@ return_type BetterODriveHardwareInterface::perform_command_mode_switch(
         }
 
         if (mode_switch) {
-            Set_Controller_Mode_msg_t msg;
+            ODriveControlMode control;
+            ODriveInputMode input;
             if (axis.pos_input_enabled_) {
                 RCLCPP_INFO(rclcpp::get_logger("BetterODriveHardwareInterface"), "Setting %s to position control", info_.joints[i].name.c_str());
-                msg.Control_Mode = CONTROL_MODE_POSITION_CONTROL;
-                msg.Input_Mode = INPUT_MODE_PASSTHROUGH;
+                control = ODriveControlMode::CONTROL_MODE_POSITION_CONTROL;
+                input = ODriveInputMode::INPUT_MODE_PASSTHROUGH;
             } else if (axis.vel_input_enabled_) {
                 RCLCPP_INFO(rclcpp::get_logger("BetterODriveHardwareInterface"), "Setting %s to velocity control", info_.joints[i].name.c_str());
-                msg.Control_Mode = CONTROL_MODE_VELOCITY_CONTROL;
-                msg.Input_Mode = INPUT_MODE_PASSTHROUGH;
+                control = ODriveControlMode::CONTROL_MODE_VELOCITY_CONTROL;
+                input = ODriveInputMode::INPUT_MODE_PASSTHROUGH;
             } else {
                 RCLCPP_INFO(rclcpp::get_logger("BetterODriveHardwareInterface"), "Setting %s to torque control", info_.joints[i].name.c_str());
-                msg.Control_Mode = CONTROL_MODE_TORQUE_CONTROL;
-                msg.Input_Mode = INPUT_MODE_PASSTHROUGH;
+                control = ODriveControlMode::CONTROL_MODE_TORQUE_CONTROL;
+                input = ODriveInputMode::INPUT_MODE_PASSTHROUGH;
             }
 
             bool any_enabled = axis.pos_input_enabled_ || axis.vel_input_enabled_ || axis.torque_input_enabled_;
 
             if (any_enabled) {
-                axis.send(msg); // Set control mode
+                axis.send_controller_mode(control, input); // Set control mode
             }
 
             // Set axis state
-            Clear_Errors_msg_t msg1;
-            msg1.Identify = 0;
-            axis.send(msg1);
+            axis.send_clear_errors();
 
-            // Set axis state
-            Set_Axis_State_msg_t msg2;
-            msg2.Axis_Requested_State = any_enabled ? AXIS_STATE_CLOSED_LOOP_CONTROL : AXIS_STATE_IDLE;
-            axis.send(msg2);
+            axis.send_axis_state(any_enabled ? AXIS_STATE_CLOSED_LOOP_CONTROL : AXIS_STATE_IDLE);
         }
     }
 
@@ -280,27 +470,48 @@ return_type BetterODriveHardwareInterface::read(const rclcpp::Time& timestamp, c
     return return_type::OK;
 }
 
-return_type BetterODriveHardwareInterface::write(const rclcpp::Time&, const rclcpp::Duration&) {
+return_type BetterODriveHardwareInterface::write(const rclcpp::Time& time, const rclcpp::Duration&) {
     for (auto& axis : axes_) {
         // Send the CAN message that fits the set of enabled setpoints
         if (axis.pos_input_enabled_) {
-            Set_Input_Pos_msg_t msg;
-            msg.Input_Pos = axis.pos_setpoint_ / (2 * M_PI);
-            msg.Vel_FF = axis.vel_input_enabled_ ? (axis.vel_setpoint_  / (2 * M_PI)) : 0.0f;
-            msg.Torque_FF = axis.torque_input_enabled_ ? axis.torque_setpoint_ : 0.0f;
-            axis.send(msg);
+            float input_pos = axis.pos_setpoint_;
+            float vel_ff = axis.vel_input_enabled_ ? axis.vel_setpoint_ : 0.0f;
+            float torque_ff = axis.torque_input_enabled_ ? axis.torque_setpoint_ : 0.0f;
+            axis.send_input_pos(input_pos, vel_ff, torque_ff);
         } else if (axis.vel_input_enabled_) {
-            Set_Input_Vel_msg_t msg;
-            msg.Input_Vel = axis.vel_setpoint_ / (2 * M_PI);
-            msg.Input_Torque_FF = axis.torque_input_enabled_ ? axis.torque_setpoint_ : 0.0f;
-            axis.send(msg);
+            float input_vel = axis.vel_setpoint_;
+            float input_torque_ff = axis.torque_input_enabled_ ? axis.torque_setpoint_ : 0.0f;
+            axis.send_input_vel(input_vel, input_torque_ff);
         } else if (axis.torque_input_enabled_) {
-            Set_Input_Torque_msg_t msg;
-            msg.Input_Torque = axis.torque_setpoint_;
-            axis.send(msg);
-        } else {
-            // no control enabled - don't send any setpoint
+            float input_torque = axis.torque_setpoint_;
+            axis.send_input_torque(input_torque);
         }
+
+        // Clear errors
+        if (axis.clear_errors_cmd_ != 0.0) {
+            axis.send_clear_errors();
+            axis.clear_errors_cmd_ = 0.0; // Consume command
+        }
+
+        // Set absolute position
+        if (axis.set_absolute_pos_cmd_ != 0.0) {
+            axis.send_absolute_position(axis.set_absolute_pos_);
+            axis.set_absolute_pos_cmd_ = 0.0; // Consume command
+        }
+
+        // E-Stop
+        if (axis.estop_ < 0.0 && (axis.last_estop_timestamp_.seconds() + estop_timeout_) > time.seconds()) {
+            // Timed out call estop
+            axis.send_estop_state(true);
+        } else if (axis.estop_ > 0.0) {
+            axis.send_estop_state(true);
+            axis.last_estop_timestamp_ = time;
+        } else {
+            axis.send_estop_state(false);
+            axis.last_estop_timestamp_ = time;
+        }
+        axis.estop_ = -1.0; // Reset command
+
     }
 
     return return_type::OK;
@@ -314,7 +525,96 @@ void BetterODriveHardwareInterface::on_can_msg(const can_frame& frame) {
     }
 }
 
-void Axis::on_can_msg(const rclcpp::Time&, const can_frame& frame) {
+void Axis::send_axis_state(const ODriveAxisState& state) {
+    Set_Axis_State_msg_t msg;
+    msg.Axis_Requested_State = state;
+    send(msg);
+}
+
+void Axis::send_controller_mode(const ODriveControlMode& control, const ODriveInputMode& input) {
+    Set_Controller_Mode_msg_t msg;
+    msg.Control_Mode = control;
+    msg.Input_Mode = input;
+    send(msg);
+}
+
+void Axis::send_clear_errors(const uint8_t& identify) {
+    Clear_Errors_msg_t msg;
+    msg.Identify = identify;
+    send(msg);
+}
+
+void better_odrive_ros2_control::Axis::send_input_pos(const double &input_pos, const double &velocity_feed_forward, const double &torque_feed_forward)
+{
+    Set_Input_Pos_msg_t msg;
+    msg.Input_Pos = input_pos / (2 * M_PI);
+    msg.Vel_FF = velocity_feed_forward / (2 * M_PI);
+    msg.Torque_FF = torque_feed_forward;
+    send(msg);
+}
+
+void better_odrive_ros2_control::Axis::send_input_vel(const double &velocity, const double &torque_feed_forward)
+{
+    Set_Input_Vel_msg_t msg;
+    msg.Input_Vel = velocity / (2 * M_PI);
+    msg.Input_Torque_FF = torque_feed_forward;
+    send(msg);
+}
+
+void better_odrive_ros2_control::Axis::send_input_torque(const double &torque)
+{
+    Set_Input_Torque_msg_t msg;
+    msg.Input_Torque = torque;
+    send(msg);
+}
+
+void better_odrive_ros2_control::Axis::send_estop_state(const bool &estop)
+{
+    Estop_msg_t msg;
+    if (estop) {
+        send(msg);
+    } else {
+        send_clear_errors();
+    }
+}
+
+void better_odrive_ros2_control::Axis::send_absolute_position(const double &position)
+{
+    Set_Absolute_Position_msg_t msg;
+    msg.Position = position / (2 * M_PI);
+}
+
+void better_odrive_ros2_control::Axis::send_limits(const double &velocity_limit, const double &current_limit)
+{
+    Set_Limits_msg_t msg;
+    msg.Velocity_Limit = velocity_limit / (2 * M_PI);
+    msg.Current_Limit = current_limit;
+    send(msg);
+}
+
+void better_odrive_ros2_control::Axis::send_trajectory_vel_limit(const double &limit)
+{
+    Set_Traj_Vel_Limit_msg_t msg;
+    msg.Traj_Vel_Limit = limit / (2 * M_PI);
+    send(msg);
+}
+
+void better_odrive_ros2_control::Axis::send_trajectory_accel_limits(const double &accel_limit, const double &decel_limit)
+{
+    Set_Traj_Accel_Limits_msg_t msg;
+    msg.Traj_Accel_Limit = accel_limit / (2 * M_PI);
+    msg.Traj_Decel_Limit = decel_limit / (2 * M_PI);
+    send(msg);
+}
+
+void better_odrive_ros2_control::Axis::send_trajectory_inertia(const double &inertia)
+{
+    Set_Traj_Inertia_msg_t msg;
+    msg.Traj_Inertia = inertia * (2 * M_PI);
+    send(msg);
+}
+
+void Axis::on_can_msg(const rclcpp::Time& time, const can_frame& frame) {
     uint8_t cmd = frame.can_id & 0x1f;
 
     auto try_decode = [&]<typename TMsg>(TMsg& msg) {
@@ -337,6 +637,56 @@ void Axis::on_can_msg(const rclcpp::Time&, const can_frame& frame) {
             if (Get_Torques_msg_t msg; try_decode(msg)) {
                 torque_target_ = msg.Torque_Target;
                 torque_estimate_ = msg.Torque_Estimate;
+            }
+        } break;
+        case Get_Temperature_msg_t::cmd_id: {
+            if (Get_Temperature_msg_t msg; try_decode(msg)) {
+                fet_temperature_ = msg.FET_Temperature;
+                motor_temperature_ = msg.Motor_Temperature;
+            }
+        } break;
+        case Get_Bus_Voltage_Current_msg_t::cmd_id: {
+            if (Get_Bus_Voltage_Current_msg_t msg; try_decode(msg)) {
+                bus_voltage_ = msg.Bus_Voltage;
+                bus_current_ = msg.Bus_Current;
+            }
+        } break;
+        case Get_Error_msg_t::cmd_id: {
+            if (Get_Error_msg_t msg; try_decode(msg)) {
+                active_errors_ = msg.Active_Errors;
+                disarm_reason_ = msg.Disarm_Reason;
+            }
+        } break;
+        case Get_Iq_msg_t::cmd_id: {
+            if (Get_Iq_msg_t msg; try_decode(msg)) {
+                iq_measured_ = msg.Iq_Measured;
+                iq_setpoint_ = msg.Iq_Setpoint;
+            }
+        } break;
+        case Get_Powers_msg_t::cmd_id: {
+            if (Get_Powers_msg_t msg; try_decode(msg)) {
+                electrical_power_ = msg.Electrical_Power;
+                mechanical_power_ = msg.Mechanical_Power;
+            }
+        } break;
+        case Get_Version_msg_t::cmd_id: {
+            if (Get_Version_msg_t msg; try_decode(msg)) {
+                protocol_version_ = msg.Protocol_Version;
+                hw_version_major_ = msg.Hw_Version_Major;
+                hw_version_minor_ = msg.Hw_Version_Minor;
+                hw_version_variant_ = msg.Hw_Version_Variant;
+                fw_version_major_ = msg.Fw_Version_Major;
+                fw_version_minor_ = msg.Fw_Version_Minor;
+                fw_version_revision_ = msg.Fw_Version_Revision;
+                fw_version_unreleased_ = msg.Fw_Version_Unreleased;
+            }
+        } break;
+        case Heartbeat_msg_t::cmd_id: {
+            if (Heartbeat_msg_t msg; try_decode(msg)) {
+                axis_error_ = msg.Axis_Error;
+                axis_state_ = msg.Axis_State;
+                procedure_result_ = msg.Procedure_Result;
+                trajectory_done_flag_ = msg.Trajectory_Done_Flag;
             }
         } break;
             // silently ignore unimplemented command IDs

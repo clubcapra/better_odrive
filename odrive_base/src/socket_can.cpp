@@ -22,10 +22,14 @@ bool SocketCanIntf::init(const std::string& interface, EpollEventLoop* event_loo
     }
 
     struct ifreq ifr;
-    std::strcpy(ifr.ifr_name, interface_.c_str());
+    std::strncpy(ifr.ifr_name, interface_.c_str(), IFNAMSIZ - 1);
+    ifr.ifr_name[IFNAMSIZ - 1] = '\0';
     if (ioctl(socket_id_, SIOCGIFINDEX, &ifr) == -1) {
         std::cerr << "Failed to get interface index" << std::endl;
-        close(socket_id_);
+        if (socket_id_ >= 0) {
+            close(socket_id_);
+            socket_id_ = -1;
+        }
         return false;
     }
 
@@ -35,7 +39,10 @@ bool SocketCanIntf::init(const std::string& interface, EpollEventLoop* event_loo
     addr.can_ifindex = ifr.ifr_ifindex;
     if (bind(socket_id_, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == -1) {
         std::cerr << "Failed to bind socket" << std::endl;
-        close(socket_id_);
+        if (socket_id_ >= 0) {
+            close(socket_id_);
+            socket_id_ = -1;
+        }
         return false;
     }
 
@@ -51,15 +58,19 @@ bool SocketCanIntf::init(const std::string& interface, EpollEventLoop* event_loo
 
     int retcode = recvmsg(socket_id_, &message, 0);
     if (retcode < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
-        close(socket_id_);
-        socket_id_ = 0;
+        if (socket_id_ >= 0) {
+            close(socket_id_);
+            socket_id_ = -1;
+        }
         return false;
     }
 
     if (!event_loop_->register_event(&socket_evt_id_, socket_id_, EPOLLIN, [this](uint32_t mask) { on_socket_event(mask); })) {
         std::cerr << "Failed to register socket with event loop" << std::endl;
-        close(socket_id_);
-        socket_id_ = 0;
+        if (socket_id_ >= 0) {
+            close(socket_id_);
+            socket_id_ = -1;
+        }
         return false;
     }
 
@@ -70,14 +81,17 @@ void SocketCanIntf::deinit() {
     if (!broken_) {
         event_loop_->deregister_event(socket_evt_id_);
     }
-    close(socket_id_);
+    if (socket_id_ >= 0) {
+        close(socket_id_);
+        socket_id_ = -1;
+    }
     broken_ = true;
 }
 
 bool SocketCanIntf::send_can_frame(const can_frame& frame) {
     ssize_t nbytes = write(socket_id_, &frame, sizeof(frame));
-    if (nbytes == -1) {
-        std::cerr << "Failed to send CAN frame" << std::endl;
+    if (nbytes != static_cast<ssize_t>(sizeof(frame))) {
+        std::cerr << "Failed to send CAN frame: " << strerror(errno) << std::endl;
         return false;
     }
 

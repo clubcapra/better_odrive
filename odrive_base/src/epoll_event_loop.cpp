@@ -5,7 +5,8 @@ EpollEventLoop::EpollEventLoop() {
 }
 
 EpollEventLoop::~EpollEventLoop() {
-    close(epollfd);
+    if (epollfd >= 0) close(epollfd);
+    epollfd = -1;
 }
 
 bool EpollEventLoop::register_event(EvtId* p_evt, int fd, uint32_t events, const Callback& callback) {
@@ -30,6 +31,7 @@ bool EpollEventLoop::deregister_event(EvtId evt) {
     if (epoll_ctl(epollfd, EPOLL_CTL_DEL, evt->fd, nullptr) == -1) return false;
     drop_event(evt);
     delete evt;
+    if (n_events_ > 0) --n_events_;
     return true;
 }
 
@@ -57,7 +59,7 @@ bool EpollEvent::init(EpollEventLoop* event_loop, const Callback& callback) {
     event_loop_ = event_loop;
     callback_ = callback;
 
-    fd_ = eventfd(0, 0);
+    fd_ = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
     if (fd_ < 0) return false;
 
     if (!event_loop->register_event(&evt_, fd_, EPOLLIN, std::bind(&EpollEvent::on_trigger, this, _1))) {
@@ -70,9 +72,10 @@ bool EpollEvent::init(EpollEventLoop* event_loop, const Callback& callback) {
 }
 
 void EpollEvent::deinit() {
-    event_loop_->deregister_event(evt_);
-    close(fd_);
+    if (evt_) event_loop_->deregister_event(evt_);
+    if (fd_ >= 0) close(fd_);
     fd_ = -1;
+    evt_ = nullptr;
 }
 
 bool EpollEvent::set() {

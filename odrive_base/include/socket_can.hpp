@@ -26,7 +26,9 @@ private:
 
     void on_socket_event(uint32_t mask);
     void process_can_frame(const can_frame& frame) {
-        frame_processor_(frame);
+        if (frame_processor_) {
+            frame_processor_(frame);
+        }
     }
 };
 
