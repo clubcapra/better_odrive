@@ -21,7 +21,6 @@ public:
     using return_type = hardware_interface::return_type;
     using State = rclcpp_lifecycle::State;
 
-
     CallbackReturn on_init(const hardware_interface::HardwareInfo& info) override;
     CallbackReturn on_configure(const State& previous_state) override;
     CallbackReturn on_cleanup(const State& previous_state) override;
@@ -48,6 +47,7 @@ private:
     SocketCanIntf can_intf_;
     rclcpp::Time timestamp_;
     double estop_timeout_ = 1.0;
+    double idle_timeout_ = 2.0;
 };
 
 struct Axis {
@@ -55,11 +55,10 @@ struct Axis {
 
     void on_can_msg(const rclcpp::Time& timestamp, const can_frame& frame);
 
-    void on_can_msg();
-
     SocketCanIntf* can_intf_;
     uint32_t node_id_;
     rclcpp::Time last_estop_timestamp_;
+    rclcpp::Time last_movement_;
 
     // Commands (ros2_control => ODrives)
     double pos_setpoint_ = 0.0; // [rad]
@@ -477,14 +476,40 @@ return_type BetterODriveHardwareInterface::write(const rclcpp::Time& time, const
             float input_pos = axis.pos_setpoint_;
             float vel_ff = axis.vel_input_enabled_ ? axis.vel_setpoint_ : 0.0f;
             float torque_ff = axis.torque_input_enabled_ ? axis.torque_setpoint_ : 0.0f;
+            if (!(-0.1 < (input_pos - axis.pos_estimate_) < 0.1)) {
+                // Significant movement
+                if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_IDLE) {
+                    axis.send_axis_state(ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL);
+                    axis.last_movement_ = time;
+                }
+            }
             axis.send_input_pos(input_pos, vel_ff, torque_ff);
         } else if (axis.vel_input_enabled_) {
             float input_vel = axis.vel_setpoint_;
             float input_torque_ff = axis.torque_input_enabled_ ? axis.torque_setpoint_ : 0.0f;
+            if (!(-0.1 < input_vel < 0.1)) {
+                // Significant movement
+                if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_IDLE) {
+                    axis.send_axis_state(ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL);
+                    axis.last_movement_ = time;
+                }
+            }
             axis.send_input_vel(input_vel, input_torque_ff);
         } else if (axis.torque_input_enabled_) {
             float input_torque = axis.torque_setpoint_;
+            if (!(-0.001 < (input_torque - axis.pos_estimate_) < 0.001)) {
+                // Significant movement
+                if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_IDLE) {
+                    axis.send_axis_state(ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL);
+                    axis.last_movement_ = time;
+                }
+            }
             axis.send_input_torque(input_torque);
+        }
+
+        if (axis.last_movement_.seconds() + idle_timeout_ < time.seconds()) {
+            // Axis timed out
+            axis.send_axis_state(ODriveAxisState::AXIS_STATE_IDLE);
         }
 
         // Clear errors
@@ -631,6 +656,10 @@ void Axis::on_can_msg(const rclcpp::Time& time, const can_frame& frame) {
             if (Get_Encoder_Estimates_msg_t msg; try_decode(msg)) {
                 pos_estimate_ = msg.Pos_Estimate * (2 * M_PI);
                 vel_estimate_ = msg.Vel_Estimate * (2 * M_PI);
+                if (!(-0.1 < vel_estimate_ < 0.1)) {
+                    // Minimal movement
+                    last_movement_ = time;
+                }
             }
         } break;
         case Get_Torques_msg_t::cmd_id: {
