@@ -16,6 +16,7 @@ set(THIS_PACKAGE_INCLUDE_DEPENDS
 
   std_msgs
   std_srvs
+  odrive_types
 
   generate_parameter_library
   pluginlib
@@ -52,6 +53,7 @@ target_link_libraries(odrive_controller_interface PUBLIC
   control_toolbox::control_toolbox
   ${std_msgs_TARGETS}
   ${std_srvs_TARGETS}
+  ${odrive_types_TARGETS}
   ${builtin_interfaces_TARGETS}
 )
 pluginlib_export_plugin_description_file(controller_interface odrive_controller_interface.xml)

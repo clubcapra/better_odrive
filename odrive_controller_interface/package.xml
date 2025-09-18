@@ -24,6 +24,7 @@
 
   <depend>std_srvs</depend>
   <depend>std_msgs</depend>
+  <depend>odrive_types</depend>
 
   <depend>generate_parameter_library</depend>
   <depend>pluginlib</depend>
