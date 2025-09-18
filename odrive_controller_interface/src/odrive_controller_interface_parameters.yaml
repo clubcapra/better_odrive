@@ -1,4 +1,9 @@
 odrive_controller_interface:
+  joint_names: {
+    type: string_array,
+    default_value: [],
+    description: "Names of the joints",
+  }
   absolute_position_names: {
     type: string_array,
     default_value: [],
