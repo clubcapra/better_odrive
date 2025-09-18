@@ -1,9 +1,0 @@
-<library path="better_odrive_ros2_control_plugin">
-  <class name="better_odrive_ros2_control_plugin/BetterODriveHardwareInterface"
-         type="better_odrive_ros2_control::BetterODriveHardwareInterface"
-         base_class_type="hardware_interface::SystemInterface">
-    <description>
-      ODrive plugin for ros2_control.
-    </description>
-  </class>
-</library>

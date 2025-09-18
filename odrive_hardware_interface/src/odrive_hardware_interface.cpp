@@ -8,7 +8,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "socket_can.hpp"
 
-namespace better_odrive_ros2_control {
+namespace odrive_hardware_interface {
 
 class Axis;
 
@@ -198,9 +198,9 @@ struct Axis {
     }
 };
 
-} // namespace better_odrive_ros2_control
+} // namespace odrive_hardware_interface
 
-using namespace better_odrive_ros2_control;
+using namespace odrive_hardware_interface;
 
 using hardware_interface::CallbackReturn;
 using hardware_interface::return_type;
@@ -569,7 +569,7 @@ void Axis::send_clear_errors(const uint8_t& identify) {
     send(msg);
 }
 
-void better_odrive_ros2_control::Axis::send_input_pos(const double &input_pos, const double &velocity_feed_forward, const double &torque_feed_forward)
+void odrive_hardware_interface::Axis::send_input_pos(const double &input_pos, const double &velocity_feed_forward, const double &torque_feed_forward)
 {
     Set_Input_Pos_msg_t msg;
     msg.Input_Pos = input_pos / (2 * M_PI);
@@ -578,7 +578,7 @@ void better_odrive_ros2_control::Axis::send_input_pos(const double &input_pos, c
     send(msg);
 }
 
-void better_odrive_ros2_control::Axis::send_input_vel(const double &velocity, const double &torque_feed_forward)
+void odrive_hardware_interface::Axis::send_input_vel(const double &velocity, const double &torque_feed_forward)
 {
     Set_Input_Vel_msg_t msg;
     msg.Input_Vel = velocity / (2 * M_PI);
@@ -586,14 +586,14 @@ void better_odrive_ros2_control::Axis::send_input_vel(const double &velocity, co
     send(msg);
 }
 
-void better_odrive_ros2_control::Axis::send_input_torque(const double &torque)
+void odrive_hardware_interface::Axis::send_input_torque(const double &torque)
 {
     Set_Input_Torque_msg_t msg;
     msg.Input_Torque = torque;
     send(msg);
 }
 
-void better_odrive_ros2_control::Axis::send_estop_state(const bool &estop)
+void odrive_hardware_interface::Axis::send_estop_state(const bool &estop)
 {
     Estop_msg_t msg;
     if (estop) {
@@ -603,13 +603,13 @@ void better_odrive_ros2_control::Axis::send_estop_state(const bool &estop)
     }
 }
 
-void better_odrive_ros2_control::Axis::send_absolute_position(const double &position)
+void odrive_hardware_interface::Axis::send_absolute_position(const double &position)
 {
     Set_Absolute_Position_msg_t msg;
     msg.Position = position / (2 * M_PI);
 }
 
-void better_odrive_ros2_control::Axis::send_limits(const double &velocity_limit, const double &current_limit)
+void odrive_hardware_interface::Axis::send_limits(const double &velocity_limit, const double &current_limit)
 {
     Set_Limits_msg_t msg;
     msg.Velocity_Limit = velocity_limit / (2 * M_PI);
@@ -617,14 +617,14 @@ void better_odrive_ros2_control::Axis::send_limits(const double &velocity_limit,
     send(msg);
 }
 
-void better_odrive_ros2_control::Axis::send_trajectory_vel_limit(const double &limit)
+void odrive_hardware_interface::Axis::send_trajectory_vel_limit(const double &limit)
 {
     Set_Traj_Vel_Limit_msg_t msg;
     msg.Traj_Vel_Limit = limit / (2 * M_PI);
     send(msg);
 }
 
-void better_odrive_ros2_control::Axis::send_trajectory_accel_limits(const double &accel_limit, const double &decel_limit)
+void odrive_hardware_interface::Axis::send_trajectory_accel_limits(const double &accel_limit, const double &decel_limit)
 {
     Set_Traj_Accel_Limits_msg_t msg;
     msg.Traj_Accel_Limit = accel_limit / (2 * M_PI);
@@ -632,7 +632,7 @@ void better_odrive_ros2_control::Axis::send_trajectory_accel_limits(const double
     send(msg);
 }
 
-void better_odrive_ros2_control::Axis::send_trajectory_inertia(const double &inertia)
+void odrive_hardware_interface::Axis::send_trajectory_inertia(const double &inertia)
 {
     Set_Traj_Inertia_msg_t msg;
     msg.Traj_Inertia = inertia * (2 * M_PI);
@@ -722,4 +722,4 @@ void Axis::on_can_msg(const rclcpp::Time& time, const can_frame& frame) {
     }
 }
 
-PLUGINLIB_EXPORT_CLASS(better_odrive_ros2_control::BetterODriveHardwareInterface, hardware_interface::SystemInterface)
+PLUGINLIB_EXPORT_CLASS(odrive_hardware_interface::BetterODriveHardwareInterface, hardware_interface::SystemInterface)

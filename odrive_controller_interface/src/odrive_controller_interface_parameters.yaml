@@ -1,0 +1,6 @@
+odrive_controller_interface:
+  absolute_position_names: {
+    type: string_array,
+    default_value: [],
+    description: "Names of the joints that require absolute position",
+  }
