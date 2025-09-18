@@ -1,5 +1,6 @@
 #include <memory>
 #include <vector>
+#include <chrono>
 
 #include "controller_interface/controller_interface.hpp"
 #include "pluginlib/class_list_macros.hpp"
@@ -74,7 +75,7 @@ protected:
     rclcpp::Service<ClearErrorSrv>::SharedPtr clear_errors_srv_{};
     rclcpp::Service<SetAbsolutePositionSrv>::SharedPtr set_absolute_position_srv_{};
 
-    bool estop_ = false;
+    int estop_ = -1;
     bool clear_all_errors_ = false;
     std::vector<bool> clear_errors_cmd_ = {};
     std::vector<double> set_absolute_positions_cmd_ = {};
@@ -93,14 +94,11 @@ BetterODriveControllerInterface::BetterODriveControllerInterface() {}
 
 controller_interface::CallbackReturn BetterODriveControllerInterface::on_init()
 {
-    try
-    {
+    try {
         param_listener_ = std::make_shared<odrive_controller_interface::ParamListener>(get_node());
         params_ = param_listener_->get_params();
         return CallbackReturn::SUCCESS;
-    }
-    catch (const std::exception & e)
-    {
+    } catch (const std::exception & e) {
         RCLCPP_ERROR_STREAM(get_node()->get_logger(), "Exception thrown during init stage with message: " << e.what() << std::endl);
         return CallbackReturn::ERROR;
     }
@@ -108,8 +106,7 @@ controller_interface::CallbackReturn BetterODriveControllerInterface::on_init()
 
 controller_interface::CallbackReturn BetterODriveControllerInterface::on_configure(const rclcpp_lifecycle::State &previous_state)
 {
-    try
-    {
+    try {
         // Reset vectors
         joint_names_ = {};
         absolute_joint_names_ = {};
@@ -131,7 +128,7 @@ controller_interface::CallbackReturn BetterODriveControllerInterface::on_configu
         
         estop_sub_ = get_node()->create_subscription<BoolMsg>(
             "~/estop", rclcpp::SystemDefaultsQoS(),
-            [this](const BoolMsg::SharedPtr msg) { estop_ = msg->data; });
+            [this](const BoolMsg::SharedPtr msg) { estop_ = msg->data ? 1 : 0; });
             
         clear_all_errors_srv_ = get_node()->create_service<TriggerSrv>(
             "~/clear_all_errors",
@@ -176,9 +173,7 @@ controller_interface::CallbackReturn BetterODriveControllerInterface::on_configu
         
         RCLCPP_INFO(get_node()->get_logger(), "configure successful");
         return CallbackReturn::SUCCESS;
-    }
-    catch (const std::exception & e)
-    {
+    } catch (const std::exception & e) {
         RCLCPP_ERROR_STREAM(get_node()->get_logger(), "Exception thrown during configure stage with message: " << e.what());
         return CallbackReturn::ERROR;
     }
@@ -273,7 +268,36 @@ controller_interface::InterfaceConfiguration BetterODriveControllerInterface::st
 
 controller_interface::return_type BetterODriveControllerInterface::update(const rclcpp::Time &time, const rclcpp::Duration &period)
 {
-    return controller_interface::return_type();
+    try {
+        for (int i = 0; i < joint_names_.size(); ++i) {
+            // Clear error commands
+            if (clear_all_errors_ || clear_errors_cmd_[i]) {
+                command_interfaces_map_.at(joint_names_[i] + "/clear_error_cmd").get().set_value(1.0);
+                clear_errors_cmd_[i] = false; // Consume command
+            }
+            // E-Stop command
+            if (estop_ != -1) {
+                command_interfaces_map_.at(joint_names_[i] + "/estop").get().set_value(estop_);
+            }
+        }
+    
+        for (int i = 0; i < absolute_joint_names_.size(); ++i) {
+            // Set absolute position commands
+            if (set_absolute_positions_cmd_[i] != NAN) {
+                command_interfaces_map_.at(absolute_joint_names_[i] + "/set_absolute_position").get().set_value(set_absolute_positions_cmd_[i]);
+                command_interfaces_map_.at(absolute_joint_names_[i] + "/set_absolute_position_cmd").get().set_value(1.0);
+                set_absolute_positions_cmd_[i] = NAN; // Consume command
+            }
+        }
+    } catch (std::exception & e) {
+        RCLCPP_ERROR_STREAM_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 1000, "Exception thrown during update stage with message: " << e.what());
+        return controller_interface::return_type::ERROR;
+    }
+
+    // Consume commands
+    clear_all_errors_ = false;
+    estop_ = -1;
+    return controller_interface::return_type::OK;
 }
 
 PLUGINLIB_EXPORT_CLASS(odrive_controller_interface::BetterODriveControllerInterface, controller_interface::ControllerInterface)
