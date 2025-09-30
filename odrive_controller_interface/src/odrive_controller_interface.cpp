@@ -11,6 +11,7 @@
 #include "std_srvs/srv/trigger.hpp"
 #include "std_msgs/msg/bool.hpp"
 #include "std_msgs/msg/float64.hpp"
+#include "realtime_tools/realtime_box.hpp"
 
 #include "odrive_types/srv/clear_error.hpp"
 #include "odrive_types/srv/set_absolute_position.hpp"
@@ -83,6 +84,8 @@ protected:
     // Joints
     std::vector<std::string> joint_names_ = {};
     std::vector<std::string> absolute_joint_names_ = {};
+
+    realtime_tools::RealtimeBox<int> rt_estop_;
 };
 
 
@@ -127,8 +130,10 @@ controller_interface::CallbackReturn BetterODriveControllerInterface::on_configu
 
         
         estop_sub_ = get_node()->create_subscription<BoolMsg>(
-            "~/estop", rclcpp::SystemDefaultsQoS(),
-            [this](const BoolMsg::SharedPtr msg) { estop_ = msg->data ? 1 : 0; });
+            "~/estop", rclcpp::SystemDefaultsQoS(), 
+            [this](const BoolMsg::SharedPtr msg) {
+                rt_estop_.set(msg->data);
+            });
             
         clear_all_errors_srv_ = get_node()->create_service<TriggerSrv>(
             "~/clear_all_errors",
@@ -181,6 +186,7 @@ controller_interface::CallbackReturn BetterODriveControllerInterface::on_configu
 
 controller_interface::CallbackReturn BetterODriveControllerInterface::on_activate(const rclcpp_lifecycle::State &previous_state)
 {
+    rt_estop_.set(estop_);
     for (auto joint_name : joint_names_) {
         {
             auto match = std::find_if(command_interfaces_.begin(), command_interfaces_.end(),
@@ -233,6 +239,7 @@ controller_interface::CallbackReturn BetterODriveControllerInterface::on_activat
 
 controller_interface::CallbackReturn BetterODriveControllerInterface::on_deactivate(const rclcpp_lifecycle::State &previous_state)
 {
+    rt_estop_.set(estop_);
     command_interfaces_map_.clear();
     return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -276,7 +283,7 @@ controller_interface::return_type BetterODriveControllerInterface::update(const 
                 clear_errors_cmd_[i] = false; // Consume command
             }
             // E-Stop command
-            if (estop_ != -1) {
+            if (rt_estop_.get(estop_); estop_ != -1) {
                 command_interfaces_map_.at(joint_names_[i] + "/estop").get().set_value(estop_);
             }
         }

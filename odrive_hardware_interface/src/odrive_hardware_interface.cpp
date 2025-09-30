@@ -470,7 +470,46 @@ return_type BetterODriveHardwareInterface::read(const rclcpp::Time& timestamp, c
 }
 
 return_type BetterODriveHardwareInterface::write(const rclcpp::Time& time, const rclcpp::Duration&) {
+    static auto clk = rclcpp::Clock();
     for (auto& axis : axes_) {
+        // Set absolute position
+        if (axis.set_absolute_pos_cmd_ != 0.0) {
+            RCLCPP_WARN_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, 
+                "Seting absolute position for axis '" << axis.node_id_ << "' to '" << axis.set_absolute_pos_ << "'");
+            axis.send_absolute_position(axis.set_absolute_pos_);
+            axis.set_absolute_pos_cmd_ = 0.0; // Consume command
+        }
+
+        // // E-Stop
+        // if (axis.estop_ < 0.0 && (axis.last_estop_timestamp_.seconds() + estop_timeout_) > time.seconds()) {
+        //     // Timed out call estop
+        //     axis.send_estop_state(true);
+        //     RCLCPP_WARN_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, 
+        //         "EStop timed out for axis '" << axis.node_id_ << "'");
+        //     return return_type::OK;
+        // } else if (axis.estop_ > 0.0) {
+        //     RCLCPP_INFO_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, 
+        //         "EStop called for axis '" << axis.node_id_ << "'");
+        //     axis.send_estop_state(true);
+        //     axis.last_estop_timestamp_ = time;
+        //     return return_type::OK;
+        // } else {
+        //     RCLCPP_DEBUG_STREAM(rclcpp::get_logger("BetterODriveHardwareInterface"), 
+        //         "EStop updated for axis '" << axis.node_id_ << "'");
+        //     axis.send_estop_state(false);
+        //     axis.last_estop_timestamp_ = time;
+        // }
+        // axis.estop_ = -1.0; // Reset command
+        axis.send_estop_state(false);
+
+        // Clear errors
+        if (axis.clear_errors_cmd_ != 0.0) {
+            RCLCPP_INFO_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, 
+                "Clearing errors for axis '" << axis.node_id_ << "'");
+            axis.send_clear_errors();
+            axis.clear_errors_cmd_ = 0.0; // Consume command
+        }
+
         // Send the CAN message that fits the set of enabled setpoints
         if (axis.pos_input_enabled_) {
             float input_pos = axis.pos_setpoint_;
@@ -478,64 +517,52 @@ return_type BetterODriveHardwareInterface::write(const rclcpp::Time& time, const
             float torque_ff = axis.torque_input_enabled_ ? axis.torque_setpoint_ : 0.0f;
             if (!(-0.1 < (input_pos - axis.pos_estimate_) < 0.1)) {
                 // Significant movement
-                if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_IDLE) {
-                    axis.send_axis_state(ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL);
-                    axis.last_movement_ = time;
-                }
+                // if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_IDLE) {
+                //     RCLCPP_INFO_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, 
+                //         "Activating position for axis '" << axis.node_id_ << "'");
+                //     axis.send_axis_state(ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL);
+                // }
+                axis.last_movement_ = time;
+                axis.send_input_pos(input_pos, vel_ff, torque_ff);
             }
-            axis.send_input_pos(input_pos, vel_ff, torque_ff);
         } else if (axis.vel_input_enabled_) {
             float input_vel = axis.vel_setpoint_;
             float input_torque_ff = axis.torque_input_enabled_ ? axis.torque_setpoint_ : 0.0f;
-            if (!(-0.1 < input_vel < 0.1)) {
+            if (!(-0.01 < input_vel < 0.01)) {
                 // Significant movement
-                if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_IDLE) {
-                    axis.send_axis_state(ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL);
-                    axis.last_movement_ = time;
-                }
+                // if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_IDLE) {
+                //     RCLCPP_INFO_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, 
+                //         "Activating velocity for axis '" << axis.node_id_ << "'");
+                //     axis.send_axis_state(ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL);
+                // }
+                axis.last_movement_ = time;
+                RCLCPP_INFO_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, 
+                    "Velocity for axis '" << axis.node_id_ << "' is: " << axis.vel_setpoint_);
+                axis.send_input_vel(input_vel, input_torque_ff);
             }
-            axis.send_input_vel(input_vel, input_torque_ff);
         } else if (axis.torque_input_enabled_) {
             float input_torque = axis.torque_setpoint_;
             if (!(-0.001 < (input_torque - axis.pos_estimate_) < 0.001)) {
                 // Significant movement
-                if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_IDLE) {
-                    axis.send_axis_state(ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL);
-                    axis.last_movement_ = time;
-                }
+                // if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_IDLE) {
+                //     RCLCPP_INFO_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, 
+                //         "Activating torque for axis '" << axis.node_id_ << "'");
+                //     axis.send_axis_state(ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL);
+                // }
+                axis.last_movement_ = time;
+                axis.send_input_torque(input_torque);
             }
-            axis.send_input_torque(input_torque);
         }
 
         if (axis.last_movement_.seconds() + idle_timeout_ < time.seconds()) {
             // Axis timed out
             axis.send_axis_state(ODriveAxisState::AXIS_STATE_IDLE);
+            RCLCPP_WARN_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "Axis '" << axis.node_id_ << "' timed out");
+        } 
+        else if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_IDLE) {
+            axis.send_axis_state(ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL);
+            RCLCPP_INFO_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "Axis '" << axis.node_id_ << "' activated");
         }
-
-        // Clear errors
-        if (axis.clear_errors_cmd_ != 0.0) {
-            axis.send_clear_errors();
-            axis.clear_errors_cmd_ = 0.0; // Consume command
-        }
-
-        // Set absolute position
-        if (axis.set_absolute_pos_cmd_ != 0.0) {
-            axis.send_absolute_position(axis.set_absolute_pos_);
-            axis.set_absolute_pos_cmd_ = 0.0; // Consume command
-        }
-
-        // E-Stop
-        if (axis.estop_ < 0.0 && (axis.last_estop_timestamp_.seconds() + estop_timeout_) > time.seconds()) {
-            // Timed out call estop
-            axis.send_estop_state(true);
-        } else if (axis.estop_ > 0.0) {
-            axis.send_estop_state(true);
-            axis.last_estop_timestamp_ = time;
-        } else {
-            axis.send_estop_state(false);
-            axis.last_estop_timestamp_ = time;
-        }
-        axis.estop_ = -1.0; // Reset command
 
     }
 
