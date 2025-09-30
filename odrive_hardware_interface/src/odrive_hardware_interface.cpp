@@ -108,6 +108,8 @@ struct Axis {
     bool vel_input_enabled_ = false;
     bool torque_input_enabled_ = false;
 
+    float min_vel = 1.f;
+
     /**
      * @brief Set the axis state
      * 
@@ -436,7 +438,7 @@ return_type BetterODriveHardwareInterface::perform_command_mode_switch(
             } else if (axis.vel_input_enabled_) {
                 RCLCPP_INFO(rclcpp::get_logger("BetterODriveHardwareInterface"), "Setting %s to velocity control", info_.joints[i].name.c_str());
                 control = ODriveControlMode::CONTROL_MODE_VELOCITY_CONTROL;
-                input = ODriveInputMode::INPUT_MODE_PASSTHROUGH;
+                input = ODriveInputMode::INPUT_MODE_VEL_RAMP;
             } else {
                 RCLCPP_INFO(rclcpp::get_logger("BetterODriveHardwareInterface"), "Setting %s to torque control", info_.joints[i].name.c_str());
                 control = ODriveControlMode::CONTROL_MODE_TORQUE_CONTROL;
@@ -452,7 +454,7 @@ return_type BetterODriveHardwareInterface::perform_command_mode_switch(
             // Set axis state
             axis.send_clear_errors();
 
-            axis.send_axis_state(any_enabled ? AXIS_STATE_CLOSED_LOOP_CONTROL : AXIS_STATE_IDLE);
+            // axis.send_axis_state(any_enabled ? AXIS_STATE_CLOSED_LOOP_CONTROL : AXIS_STATE_IDLE);
         }
     }
 
@@ -515,43 +517,21 @@ return_type BetterODriveHardwareInterface::write(const rclcpp::Time& time, const
             float input_pos = axis.pos_setpoint_;
             float vel_ff = axis.vel_input_enabled_ ? axis.vel_setpoint_ : 0.0f;
             float torque_ff = axis.torque_input_enabled_ ? axis.torque_setpoint_ : 0.0f;
-            if (!(-0.1 < (input_pos - axis.pos_estimate_) < 0.1)) {
-                // Significant movement
-                // if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_IDLE) {
-                //     RCLCPP_INFO_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, 
-                //         "Activating position for axis '" << axis.node_id_ << "'");
-                //     axis.send_axis_state(ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL);
-                // }
-                axis.last_movement_ = time;
-                axis.send_input_pos(input_pos, vel_ff, torque_ff);
-            }
+            axis.last_movement_ = time;
+            axis.send_input_pos(input_pos, vel_ff, torque_ff);
         } else if (axis.vel_input_enabled_) {
             float input_vel = axis.vel_setpoint_;
             float input_torque_ff = axis.torque_input_enabled_ ? axis.torque_setpoint_ : 0.0f;
-            if (!(-0.01 < input_vel < 0.01)) {
-                // Significant movement
-                // if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_IDLE) {
-                //     RCLCPP_INFO_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, 
-                //         "Activating velocity for axis '" << axis.node_id_ << "'");
-                //     axis.send_axis_state(ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL);
-                // }
+            if (std::abs(input_vel) > axis.min_vel) {
                 axis.last_movement_ = time;
-                RCLCPP_INFO_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, 
-                    "Velocity for axis '" << axis.node_id_ << "' is: " << axis.vel_setpoint_);
-                axis.send_input_vel(input_vel, input_torque_ff);
             }
+            RCLCPP_INFO_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, 
+                "Velocity for axis '" << axis.node_id_ << "' is: " << axis.vel_setpoint_);
+            axis.send_input_vel(input_vel, input_torque_ff);
         } else if (axis.torque_input_enabled_) {
             float input_torque = axis.torque_setpoint_;
-            if (!(-0.001 < (input_torque - axis.pos_estimate_) < 0.001)) {
-                // Significant movement
-                // if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_IDLE) {
-                //     RCLCPP_INFO_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, 
-                //         "Activating torque for axis '" << axis.node_id_ << "'");
-                //     axis.send_axis_state(ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL);
-                // }
-                axis.last_movement_ = time;
-                axis.send_input_torque(input_torque);
-            }
+            axis.last_movement_ = time;
+            axis.send_input_torque(input_torque);
         }
 
         if (axis.last_movement_.seconds() + idle_timeout_ < time.seconds()) {
@@ -596,7 +576,7 @@ void Axis::send_clear_errors(const uint8_t& identify) {
     send(msg);
 }
 
-void odrive_hardware_interface::Axis::send_input_pos(const double &input_pos, const double &velocity_feed_forward, const double &torque_feed_forward)
+void Axis::send_input_pos(const double &input_pos, const double &velocity_feed_forward, const double &torque_feed_forward)
 {
     Set_Input_Pos_msg_t msg;
     msg.Input_Pos = input_pos / (2 * M_PI);
@@ -605,7 +585,7 @@ void odrive_hardware_interface::Axis::send_input_pos(const double &input_pos, co
     send(msg);
 }
 
-void odrive_hardware_interface::Axis::send_input_vel(const double &velocity, const double &torque_feed_forward)
+void Axis::send_input_vel(const double &velocity, const double &torque_feed_forward)
 {
     Set_Input_Vel_msg_t msg;
     msg.Input_Vel = velocity / (2 * M_PI);
@@ -613,14 +593,14 @@ void odrive_hardware_interface::Axis::send_input_vel(const double &velocity, con
     send(msg);
 }
 
-void odrive_hardware_interface::Axis::send_input_torque(const double &torque)
+void Axis::send_input_torque(const double &torque)
 {
     Set_Input_Torque_msg_t msg;
     msg.Input_Torque = torque;
     send(msg);
 }
 
-void odrive_hardware_interface::Axis::send_estop_state(const bool &estop)
+void Axis::send_estop_state(const bool &estop)
 {
     Estop_msg_t msg;
     if (estop) {
@@ -630,13 +610,14 @@ void odrive_hardware_interface::Axis::send_estop_state(const bool &estop)
     }
 }
 
-void odrive_hardware_interface::Axis::send_absolute_position(const double &position)
+void Axis::send_absolute_position(const double &position)
 {
     Set_Absolute_Position_msg_t msg;
     msg.Position = position / (2 * M_PI);
+    send(msg);
 }
 
-void odrive_hardware_interface::Axis::send_limits(const double &velocity_limit, const double &current_limit)
+void Axis::send_limits(const double &velocity_limit, const double &current_limit)
 {
     Set_Limits_msg_t msg;
     msg.Velocity_Limit = velocity_limit / (2 * M_PI);
@@ -644,14 +625,14 @@ void odrive_hardware_interface::Axis::send_limits(const double &velocity_limit, 
     send(msg);
 }
 
-void odrive_hardware_interface::Axis::send_trajectory_vel_limit(const double &limit)
+void Axis::send_trajectory_vel_limit(const double &limit)
 {
     Set_Traj_Vel_Limit_msg_t msg;
     msg.Traj_Vel_Limit = limit / (2 * M_PI);
     send(msg);
 }
 
-void odrive_hardware_interface::Axis::send_trajectory_accel_limits(const double &accel_limit, const double &decel_limit)
+void Axis::send_trajectory_accel_limits(const double &accel_limit, const double &decel_limit)
 {
     Set_Traj_Accel_Limits_msg_t msg;
     msg.Traj_Accel_Limit = accel_limit / (2 * M_PI);
@@ -659,7 +640,7 @@ void odrive_hardware_interface::Axis::send_trajectory_accel_limits(const double 
     send(msg);
 }
 
-void odrive_hardware_interface::Axis::send_trajectory_inertia(const double &inertia)
+void Axis::send_trajectory_inertia(const double &inertia)
 {
     Set_Traj_Inertia_msg_t msg;
     msg.Traj_Inertia = inertia * (2 * M_PI);
@@ -683,7 +664,7 @@ void Axis::on_can_msg(const rclcpp::Time& time, const can_frame& frame) {
             if (Get_Encoder_Estimates_msg_t msg; try_decode(msg)) {
                 pos_estimate_ = msg.Pos_Estimate * (2 * M_PI);
                 vel_estimate_ = msg.Vel_Estimate * (2 * M_PI);
-                if (!(-0.1 < vel_estimate_ < 0.1)) {
+                if (std::abs(vel_estimate_) > min_vel) {
                     // Minimal movement
                     last_movement_ = time;
                 }
