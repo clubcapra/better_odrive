@@ -57,8 +57,6 @@ struct Axis {
 
     SocketCanIntf* can_intf_;
     uint32_t node_id_;
-    rclcpp::Time last_estop_timestamp_;
-    rclcpp::Time last_movement_;
 
     // Commands (ros2_control => ODrives)
     double pos_setpoint_ = 0.0; // [rad]
@@ -107,8 +105,6 @@ struct Axis {
     bool pos_input_enabled_ = false;
     bool vel_input_enabled_ = false;
     bool torque_input_enabled_ = false;
-
-    float min_vel = 1.f;
 
     /**
      * @brief Set the axis state
@@ -376,11 +372,6 @@ std::vector<hardware_interface::CommandInterface> BetterODriveHardwareInterface:
             "set_absolute_position",
             &axes_[i].set_absolute_pos_
         );
-        // command_interfaces.emplace_back(
-        //     info_.joints[i].name,
-        //     "set_absolute_pos_cmd",
-        //     &axes_[i].set_absolute_pos_cmd_
-        // );
         command_interfaces.emplace_back(
             info_.joints[i].name,
             "clear_errors_cmd",
@@ -455,11 +446,6 @@ return_type BetterODriveHardwareInterface::perform_command_mode_switch(
             if (any_enabled) {
                 axis.send_controller_mode(control, input); // Set control mode
             }
-
-            // Set axis state
-            axis.send_clear_errors();
-
-            // axis.send_axis_state(any_enabled ? AXIS_STATE_CLOSED_LOOP_CONTROL : AXIS_STATE_IDLE);
         }
     }
 
@@ -521,45 +507,19 @@ return_type BetterODriveHardwareInterface::write(const rclcpp::Time& time, const
             float input_pos = axis.pos_setpoint_;
             float vel_ff = axis.vel_input_enabled_ ? axis.vel_setpoint_ : 0.0f;
             float torque_ff = axis.torque_input_enabled_ ? axis.torque_setpoint_ : 0.0f;
-            axis.last_movement_ = time;
             axis.send_input_pos(input_pos, vel_ff, torque_ff);
         } else if (axis.vel_input_enabled_) {
             float input_vel = axis.vel_setpoint_;
             float input_torque_ff = axis.torque_input_enabled_ ? axis.torque_setpoint_ : 0.0f;
-            if (std::abs(input_vel) > axis.min_vel) {
-                axis.last_movement_ = time;
-            }
             RCLCPP_INFO_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, 
                 "Velocity for axis '" << axis.node_id_ << "' is: " << axis.vel_setpoint_);
             axis.send_input_vel(input_vel, input_torque_ff);
         } else if (axis.torque_input_enabled_) {
             float input_torque = axis.torque_setpoint_;
-            axis.last_movement_ = time;
             axis.send_input_torque(input_torque);
         }
 
-        // if (axis.last_movement_.seconds() + idle_timeout_ < time.seconds()) {
-        //     // Axis timed out
-        //     axis.send_axis_state(ODriveAxisState::AXIS_STATE_IDLE);
-        //     RCLCPP_WARN_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "Axis '" << axis.node_id_ << "' timed out");
-        // } 
-        // else if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_IDLE) {
-        //     axis.send_axis_state(ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL);
-        //     RCLCPP_INFO_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "Axis '" << axis.node_id_ << "' activated");
-        // }
         bool any_enabled = axis.pos_input_enabled_ || axis.vel_input_enabled_ || axis.torque_input_enabled_;
-
-        // if (any_enabled == 1) {
-        //     if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_IDLE) {
-        //         axis.send_axis_state(ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL);
-        //     }
-        // } else {
-        //     if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL) {
-        //         axis.send_axis_state(ODriveAxisState::AXIS_STATE_IDLE);
-        //     }
-        // }
-        RCLCPP_INFO_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, 
-            "Enable for axis: " << axis.node_id_ << " state: " << axis.enable_);
 
         if (axis.enable_ > 0.5 && any_enabled) {
             if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_IDLE) {
@@ -690,10 +650,6 @@ void Axis::on_can_msg(const rclcpp::Time& time, const can_frame& frame) {
             if (Get_Encoder_Estimates_msg_t msg; try_decode(msg)) {
                 pos_estimate_ = msg.Pos_Estimate * (2 * M_PI);
                 vel_estimate_ = msg.Vel_Estimate * (2 * M_PI);
-                if (std::abs(vel_estimate_) > min_vel) {
-                    // Minimal movement
-                    last_movement_ = time;
-                }
             }
         } break;
         case Get_Torques_msg_t::cmd_id: {
