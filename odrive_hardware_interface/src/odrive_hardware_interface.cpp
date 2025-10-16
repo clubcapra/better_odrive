@@ -373,24 +373,24 @@ std::vector<hardware_interface::CommandInterface> BetterODriveHardwareInterface:
         ));
         command_interfaces.emplace_back(
             info_.joints[i].name,
-            "set_absolute_pos",
+            "set_absolute_position",
             &axes_[i].set_absolute_pos_
         );
-        command_interfaces.emplace_back(
-            info_.joints[i].name,
-            "set_absolute_pos_cmd",
-            &axes_[i].set_absolute_pos_cmd_
-        );
+        // command_interfaces.emplace_back(
+        //     info_.joints[i].name,
+        //     "set_absolute_pos_cmd",
+        //     &axes_[i].set_absolute_pos_cmd_
+        // );
         command_interfaces.emplace_back(
             info_.joints[i].name,
             "clear_errors_cmd",
             &axes_[i].clear_errors_cmd_
         );
-        command_interfaces.emplace_back(
-            info_.joints[i].name,
-            "estop",
-            &axes_[i].estop_
-        );
+        // command_interfaces.emplace_back(
+        //     info_.joints[i].name,
+        //     "estop",
+        //     &axes_[i].estop_
+        // );
         command_interfaces.emplace_back(
             info_.joints[i].name,
             "enable",
@@ -480,11 +480,10 @@ return_type BetterODriveHardwareInterface::write(const rclcpp::Time& time, const
     static auto clk = rclcpp::Clock();
     for (auto& axis : axes_) {
         // Set absolute position
-        if (axis.set_absolute_pos_cmd_ != 0.0) {
+        if (!std::isnan(axis.set_absolute_pos_)) {
             RCLCPP_WARN_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, 
                 "Seting absolute position for axis '" << axis.node_id_ << "' to '" << axis.set_absolute_pos_ << "'");
             axis.send_absolute_position(axis.set_absolute_pos_);
-            axis.set_absolute_pos_cmd_ = 0.0; // Consume command
         }
 
         // // E-Stop
@@ -510,7 +509,7 @@ return_type BetterODriveHardwareInterface::write(const rclcpp::Time& time, const
         axis.send_estop_state(false);
 
         // Clear errors
-        if (axis.clear_errors_cmd_ != 0.0) {
+        if (axis.clear_errors_cmd_ > 0.5) {
             RCLCPP_INFO_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, 
                 "Clearing errors for axis '" << axis.node_id_ << "'");
             axis.send_clear_errors();

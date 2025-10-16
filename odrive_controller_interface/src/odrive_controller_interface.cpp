@@ -142,7 +142,7 @@ public:
 
     bool read(size_t i, T& v) noexcept {
         if (i >= _size) return false;
-        if (_available[i]) {
+        if (_available[i].load(std::memory_order_relaxed)) {
             v = _values[i].load(std::memory_order_relaxed);
             _available[i].store(false, std::memory_order_relaxed);
             return true;
@@ -152,7 +152,7 @@ public:
 
     bool read(size_t i, T& v) volatile noexcept {
         if (i >= _size) return false;
-        if (_available[i]) {
+        if (_available[i].load(std::memory_order_relaxed)) {
             v = _values[i].load(std::memory_order_relaxed);
             _available[i].store(false, std::memory_order_relaxed);
             return true;
@@ -162,7 +162,7 @@ public:
 
     bool read_without_notify(size_t i, T& v) const noexcept {
         if (i >= _size) return false;
-        if (_available[i]) {
+        if (_available[i].load(std::memory_order_relaxed)) {
             v = _values[i].load(std::memory_order_relaxed);
             return true;
         }
@@ -171,7 +171,7 @@ public:
 
     bool read_without_notify(size_t i, T& v) const volatile noexcept {
         if (i >= _size) return false;
-        if (_available[i]) {
+        if (_available[i].load(std::memory_order_relaxed)) {
             v = _values[i].load(std::memory_order_relaxed);
             return true;
         }
@@ -202,9 +202,9 @@ public:
     }
 
 private:
-    size_t _size;
-    std::atomic<bool>* _available;
-    std::atomic<T>* _values;
+    size_t _size = 0;
+    std::atomic<bool>* _available = nullptr;
+    std::atomic<T>* _values = nullptr;
 };
 
 template <typename T>
@@ -233,7 +233,7 @@ public:
         _values = new std::atomic<T>[size];
         _size = size;
         for (int i = 0; i < size; ++i) {
-            _values[i] = v;
+            _values[i].store(v, std::memory_order_relaxed);
         }
     }
 
@@ -284,16 +284,19 @@ private:
     std::atomic<T>* _values = nullptr;
 };
 
+constexpr const char ODRIVE_IF_ENABLE[] = "enable";
+constexpr const char ODRIVE_IF_CLEAR_ERRORS_CMD[] = "clear_errors_cmd";
+constexpr const char ODRIVE_IF_SET_ABSOLUTE_POSITION[] = "set_absolute_position";
+
 class BetterODriveControllerInterface : public controller_interface::ControllerInterface {
-
 public:
-  BetterODriveControllerInterface();
+    BetterODriveControllerInterface();
 
-  
-  controller_interface::CallbackReturn on_init() override;
-  
-  controller_interface::CallbackReturn on_configure(
-      const rclcpp_lifecycle::State & previous_state) override;
+    
+    controller_interface::CallbackReturn on_init() override;
+    
+    controller_interface::CallbackReturn on_configure(
+        const rclcpp_lifecycle::State & previous_state) override;
       
     controller_interface::CallbackReturn on_activate(
         const rclcpp_lifecycle::State & previous_state) override;
@@ -330,8 +333,9 @@ protected:
     std::vector<std::string> absolute_joint_names_ = {};
 
     // Command values
-    
-    volatile AtomicArray<bool> joint_enables_ = {};
+    volatile AtomicArray<bool> joints_enable_ = {};
+    volatile AtomicArray<bool> joints_clear_error_ = {};
+    volatile AtomicEventArray<double> joints_set_absolute_position_ = {};
 };
 
 
@@ -364,17 +368,15 @@ controller_interface::CallbackReturn BetterODriveControllerInterface::on_configu
         for (auto joint_name : params_.joint_names) {
             joint_names_.emplace_back(joint_name);
         }
-        // clear_errors_cmd_.resize(joint_names_.size(), false);
-        // rt_enable_.resize(joint_names_.size(), false);
+        joints_clear_error_.resize(joint_names_.size(), false);
         enable_subs_.reserve(joint_names_.size());
-        // joint_enables_ = new std::atomic_bool[joint_names_.size()];
-        joint_enables_.resize(joint_names_.size(), false);
+        joints_enable_.resize(joint_names_.size(), false);
         
         // Register absolute joints
         for (auto joint_name : params_.absolute_position_names) {
             absolute_joint_names_.emplace_back(joint_name);
         }
-        // set_absolute_positions_cmd_.resize(absolute_joint_names_.size(), NAN);
+        joints_set_absolute_position_.resize(absolute_joint_names_.size(), 0);
 
         
         // estop_sub_ = get_node()->create_subscription<BoolMsg>(
@@ -383,73 +385,81 @@ controller_interface::CallbackReturn BetterODriveControllerInterface::on_configu
         //         rt_estop_.set(msg->data);
         //     });
 
-        // enable_sub_ = get_node()->create_subscription<JointBoolMsg>(
-        //     "~/enable", rclcpp::SystemDefaultsQoS(), 
-        //     [this](const JointBoolMsg::SharedPtr msg) {
-        //         for (int i = 0; i < msg->joint_names.size(); ++i) {
-        //             if (
-        //                 auto match = std::find_if(joint_names_.cbegin(), joint_names_.cend(),
-        //                 [&](const std::string joint){return joint == msg->joint_names[i];});
-        //                 match != joint_names_.cend()
-        //             ) {
-        //                 int index = (int)(match - joint_names_.cend());
-        //                 rt_enable_.write(index, msg->state[i]);
-        //             }
-        //         }
-        //     });
         for (int i = 0; i < joint_names_.size(); ++i) {
-            joint_enables_.write(i, false);
+            joints_enable_.write(i, false);
             enable_subs_.emplace_back(get_node()->create_subscription<BoolMsg>(
                 "~/enable/" + joint_names_[i], rclcpp::SystemDefaultsQoS(),
                 [this, i](const BoolMsg::SharedPtr msg) {
                     if (msg) {
-                        joint_enables_.write(i, msg->data);
+                        joints_enable_.write(i, msg->data);
                     }
                 }
             ));
         }
 
             
-        // clear_all_errors_srv_ = get_node()->create_service<TriggerSrv>(
-        //     "~/clear_all_errors",
-        //     [this](const TriggerSrv::Request::SharedPtr,
-        //         TriggerSrv::Response::SharedPtr) {
-        //         clear_all_errors_ = true;
-        //     });
+        clear_all_errors_srv_ = get_node()->create_service<TriggerSrv>(
+            "~/clear_all_errors",
+            [this](const TriggerSrv::Request::SharedPtr,
+                TriggerSrv::Response::SharedPtr response) {
+                    response->message = "";
+                    response->success = true;
+                    for (int i = 0; i < joint_names_.size(); ++i) {
+                        if (!joints_clear_error_.write(i, true)) {
+                            response->success = false;
+                            response->message += "Index out of range\n";
+                            return;
+                        }
+                    }
+                });
         
-        // clear_errors_srv_ = get_node()->create_service<ClearErrorSrv>(
-        //     "~/clear_errors",
-        //     [this](const ClearErrorSrv::Request::SharedPtr request,
-        //         ClearErrorSrv::Response::SharedPtr response) {
-        //             for (auto joint_name : request->joint_names) {
-        //                 auto match = std::find(joint_names_.begin(), joint_names_.end(), joint_name);
-        //                 if (match != joint_names_.end()) {
-        //                     auto index = match - joint_names_.begin();
-        //                     clear_errors_cmd_[index] = true;
-        //                 } else {
-        //                     RCLCPP_WARN_STREAM(get_node()->get_logger(), "No joint named '" << joint_name << "'");
-        //                 }
-        //             }
-        //         });
+        clear_errors_srv_ = get_node()->create_service<ClearErrorSrv>(
+            "~/clear_errors",
+            [this](const ClearErrorSrv::Request::SharedPtr request,
+                ClearErrorSrv::Response::SharedPtr response) {
+                    response->message = "";
+                    response->success = true;
+                    for (auto joint_name : request->joint_names) {
+                        auto match = std::find(joint_names_.begin(), joint_names_.end(), joint_name);
+                        if (match != joint_names_.end()) {
+                            auto index = match - joint_names_.begin();
+                            if (!joints_clear_error_.write(index, true)) {
+                                response->success = false;
+                                response->message += "Index out of range\n";
+                                return;
+                            }
+                        } else {
+                            response->success = false;
+                            response->message += "No axis named: " + joint_name + "\n";
+                        }
+                    }
+                });
         
-        // set_absolute_position_srv_ = get_node()->create_service<SetAbsolutePositionSrv>(
-        //     "~/set_absolute_positions",
-        //     [this](const SetAbsolutePositionSrv::Request::SharedPtr request,
-        //         SetAbsolutePositionSrv::Response::SharedPtr response) {
-        //             if (request->joint_names.size() != request->positions.size()) {
-        //                 RCLCPP_ERROR(get_node()->get_logger(), "Size mismatch in 'SetAbsolutePositionSrv'");
-        //                 return;
-        //             }
-        //             for (auto joint_name : request->joint_names) {
-        //                 auto match = std::find(absolute_joint_names_.begin(), absolute_joint_names_.end(), joint_name);
-        //                 if (match != absolute_joint_names_.end()) {
-        //                     auto index = match - absolute_joint_names_.begin();
-        //                     set_absolute_positions_cmd_[index] = request->positions[index];
-        //                 } else {
-        //                     RCLCPP_WARN_STREAM(get_node()->get_logger(), "No joint named '" << joint_name << "'");
-        //                 }
-        //             }
-        //         });
+        set_absolute_position_srv_ = get_node()->create_service<SetAbsolutePositionSrv>(
+            "~/set_absolute_positions",
+            [this](const SetAbsolutePositionSrv::Request::SharedPtr request,
+                SetAbsolutePositionSrv::Response::SharedPtr response) {
+                    response->message = "";
+                    response->success = true;
+                    if (request->joint_names.size() != request->positions.size()) {
+                        response->success = false;
+                        response->message += "Size mismatch in 'SetAbsolutePositionSrv'\n";
+                        return;
+                    }
+                    for (auto joint_name : request->joint_names) {
+                        auto match = std::find(absolute_joint_names_.begin(), absolute_joint_names_.end(), joint_name);
+                        if (match != absolute_joint_names_.end()) {
+                            auto index = match - absolute_joint_names_.begin();
+                            if (!joints_set_absolute_position_.write(index, request->positions[index])) {
+                                response->success = false;
+                                response->message += "Index out of range\n";
+                            }
+                        } else {
+                            response->success = false;
+                            response->message += "No axis marked as absolute named: " + joint_name + "\n"; 
+                        }
+                    }
+                });
         
         RCLCPP_INFO(get_node()->get_logger(), "configure successful");
         return CallbackReturn::SUCCESS;
@@ -464,24 +474,24 @@ controller_interface::CallbackReturn BetterODriveControllerInterface::on_activat
     // rt_estop_.set(estop_);
     for (auto joint_name : joint_names_) {
         {
+            // {
+            //     auto match = std::find_if(command_interfaces_.begin(), command_interfaces_.end(),
+            //         [&](hardware_interface::LoanedCommandInterface& interface) {
+            //             return interface.get_prefix_name() == joint_name && interface.get_interface_name() == "estop";
+            //         }
+            //     );
+            //     if (match != command_interfaces_.end()) {
+            //         command_interfaces_map_.emplace(joint_name + "/estop", std::ref(*match));
+            //     }
+            // }
             {
                 auto match = std::find_if(command_interfaces_.begin(), command_interfaces_.end(),
                     [&](hardware_interface::LoanedCommandInterface& interface) {
-                        return interface.get_prefix_name() == joint_name && interface.get_interface_name() == "estop";
+                        return interface.get_prefix_name() == joint_name && interface.get_interface_name() == ODRIVE_IF_ENABLE;
                     }
                 );
                 if (match != command_interfaces_.end()) {
-                    command_interfaces_map_.emplace(joint_name + "/estop", std::ref(*match));
-                }
-            }
-            {
-                auto match = std::find_if(command_interfaces_.begin(), command_interfaces_.end(),
-                    [&](hardware_interface::LoanedCommandInterface& interface) {
-                        return interface.get_prefix_name() == joint_name && interface.get_interface_name() == "enable";
-                    }
-                );
-                if (match != command_interfaces_.end()) {
-                    command_interfaces_map_.emplace(joint_name + "/enable", std::ref(*match));
+                    command_interfaces_map_.emplace(joint_name + "/" + ODRIVE_IF_ENABLE, std::ref(*match));
                 }
             }
         }
@@ -489,11 +499,11 @@ controller_interface::CallbackReturn BetterODriveControllerInterface::on_activat
         {
             auto match = std::find_if(command_interfaces_.begin(), command_interfaces_.end(),
                 [&](hardware_interface::LoanedCommandInterface& interface) {
-                    return interface.get_prefix_name() == joint_name && interface.get_interface_name() == "clear_error_cmd";
+                    return interface.get_prefix_name() == joint_name && interface.get_interface_name() == ODRIVE_IF_CLEAR_ERRORS_CMD;
                 }
             );
             if (match != command_interfaces_.end()) {
-                command_interfaces_map_.emplace(joint_name + "/clear_error_cmd", std::ref(*match));
+                command_interfaces_map_.emplace(joint_name + "/" + ODRIVE_IF_CLEAR_ERRORS_CMD, std::ref(*match));
             }
         }
     }
@@ -502,24 +512,24 @@ controller_interface::CallbackReturn BetterODriveControllerInterface::on_activat
         {
             auto match = std::find_if(command_interfaces_.begin(), command_interfaces_.end(),
                 [&](hardware_interface::LoanedCommandInterface& interface) {
-                    return interface.get_prefix_name() == joint_name && interface.get_interface_name() == "set_absolute_position";
+                    return interface.get_prefix_name() == joint_name && interface.get_interface_name() == ODRIVE_IF_SET_ABSOLUTE_POSITION;
                 }
             );
             if (match != command_interfaces_.end()) {
-                command_interfaces_map_.emplace(joint_name + "/set_absolute_position", std::ref(*match));
+                command_interfaces_map_.emplace(joint_name + "/" + ODRIVE_IF_SET_ABSOLUTE_POSITION, std::ref(*match));
             }
         }
 
-        {
-            auto match = std::find_if(command_interfaces_.begin(), command_interfaces_.end(),
-                [&](hardware_interface::LoanedCommandInterface& interface) {
-                    return interface.get_prefix_name() == joint_name && interface.get_interface_name() == "set_absolute_position_cmd";
-                }
-            );
-            if (match != command_interfaces_.end()) {
-                command_interfaces_map_.emplace(joint_name + "/set_absolute_position_cmd", std::ref(*match));
-            }
-        }
+        // {
+        //     auto match = std::find_if(command_interfaces_.begin(), command_interfaces_.end(),
+        //         [&](hardware_interface::LoanedCommandInterface& interface) {
+        //             return interface.get_prefix_name() == joint_name && interface.get_interface_name() == "set_absolute_position_cmd";
+        //         }
+        //     );
+        //     if (match != command_interfaces_.end()) {
+        //         command_interfaces_map_.emplace(joint_name + "/set_absolute_position_cmd", std::ref(*match));
+        //     }
+        // }
     }
     return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -533,9 +543,9 @@ controller_interface::CallbackReturn BetterODriveControllerInterface::on_deactiv
 
 controller_interface::CallbackReturn BetterODriveControllerInterface::on_cleanup(const rclcpp_lifecycle::State &previous_state)
 {
-    // if (joint_enables_) {
-    //     delete[] joint_enables_;
-    //     joint_enables_ = nullptr;
+    // if (joints_enable_) {
+    //     delete[] joints_enable_;
+    //     joints_enable_ = nullptr;
     // }
     return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -546,14 +556,14 @@ controller_interface::InterfaceConfiguration BetterODriveControllerInterface::co
     config.type = controller_interface::interface_configuration_type::INDIVIDUAL;
 
     for (auto joint_name : joint_names_) {
-        config.names.emplace_back(joint_name + "/estop");
-        config.names.emplace_back(joint_name + "/enable");
-        config.names.emplace_back(joint_name + "/clear_errors_cmd");
+        // config.names.emplace_back(joint_name + "/estop");
+        config.names.emplace_back(joint_name + "/" + ODRIVE_IF_ENABLE);
+        config.names.emplace_back(joint_name + "/" + ODRIVE_IF_CLEAR_ERRORS_CMD);
     }
 
     for (auto joint_name : absolute_joint_names_) {
-        config.names.emplace_back(joint_name + "/set_absolute_pos");
-        config.names.emplace_back(joint_name + "/set_absolute_pos_cmd");
+        config.names.emplace_back(joint_name + "/" + ODRIVE_IF_SET_ABSOLUTE_POSITION);
+        // config.names.emplace_back(joint_name + "/set_absolute_pos_cmd");
     }
     return config;
 }
@@ -570,10 +580,13 @@ controller_interface::return_type BetterODriveControllerInterface::update(const 
     try {
         for (int i = 0; i < joint_names_.size(); ++i) {
             // Clear error commands
-            // if (clear_all_errors_ || clear_errors_cmd_[i]) {
-            //     command_interfaces_map_.at(joint_names_[i] + "/clear_error_cmd").get().set_value(1.0);
-            //     clear_errors_cmd_[i] = false; // Consume command
-            // }
+            bool clear_error = false;
+            if (joints_clear_error_.read(i, clear_error)) {
+                command_interfaces_map_.at(joint_names_[i] + "/" + ODRIVE_IF_CLEAR_ERRORS_CMD).get().set_value(clear_error ? 1.0 : 0.0);
+                joints_clear_error_.write(i, false); // Consume command
+            } else {
+                command_interfaces_map_.at(joint_names_[i] + "/" + ODRIVE_IF_CLEAR_ERRORS_CMD).get().set_value(0.0);
+            }
             // E-Stop command
             // if (rt_estop_.get(estop_); estop_ != -1) {
             //     command_interfaces_map_.at(joint_names_[i] + "/estop").get().set_value(estop_);
@@ -587,27 +600,25 @@ controller_interface::return_type BetterODriveControllerInterface::update(const 
             //     command_interfaces_map_.at(joint_names_[i] + "/enable").get().set_value(-1);
             // }
             bool enable = false;
-            if (joint_enables_.read(i, enable)) {
-                command_interfaces_map_.at(joint_names_[i] + "/enable").get().set_value(enable ? 1.0 : 0.0);
+            if (joints_enable_.read(i, enable)) {
+                command_interfaces_map_.at(joint_names_[i] + "/" + ODRIVE_IF_ENABLE).get().set_value(enable ? 1.0 : 0.0);
             }
         }
     
         for (int i = 0; i < absolute_joint_names_.size(); ++i) {
             // Set absolute position commands
-            // if (set_absolute_positions_cmd_[i] != NAN) {
-            //     command_interfaces_map_.at(absolute_joint_names_[i] + "/set_absolute_position").get().set_value(set_absolute_positions_cmd_[i]);
-            //     command_interfaces_map_.at(absolute_joint_names_[i] + "/set_absolute_position_cmd").get().set_value(1.0);
-            //     set_absolute_positions_cmd_[i] = NAN; // Consume command
-            // }
+            double absolute_position = 0.0;
+            if (joints_set_absolute_position_.read(i, absolute_position)) {
+                command_interfaces_map_.at(absolute_joint_names_[i] + "/" + ODRIVE_IF_SET_ABSOLUTE_POSITION).get().set_value(absolute_position);
+            } else {
+                command_interfaces_map_.at(absolute_joint_names_[i] + "/" + ODRIVE_IF_SET_ABSOLUTE_POSITION).get().set_value(NAN);
+            }
         }
     } catch (std::exception & e) {
         RCLCPP_ERROR_STREAM_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 1000, "Exception thrown during update stage with message: " << e.what());
         return controller_interface::return_type::ERROR;
     }
 
-    // Consume commands
-    // clear_all_errors_ = false;
-    // estop_ = -1;
     return controller_interface::return_type::OK;
 }
 
