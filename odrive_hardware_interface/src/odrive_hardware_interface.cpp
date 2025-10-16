@@ -65,6 +65,7 @@ struct Axis {
     double vel_setpoint_ = 0.0; // [rad/s]
     double torque_setpoint_ = 0.0; // [Nm]
     double estop_ = -1.0;
+    double enable_ = -1.0;
     trigger_command clear_errors_cmd_ = 0.0;
     double set_absolute_pos_ = 0.0; // [rad]
     trigger_command set_absolute_pos_cmd_ = 0.0;
@@ -97,7 +98,6 @@ struct Axis {
     uint8_state fw_version_minor_ = 0;
     uint8_state fw_version_revision_ = 0;
     uint8_state fw_version_unreleased_ = 0;
-
 
     // Indicates which controller inputs are enabled. This is configured by the
     // controller that sits on top of this hardware interface. Multiple inputs
@@ -391,6 +391,11 @@ std::vector<hardware_interface::CommandInterface> BetterODriveHardwareInterface:
             "estop",
             &axes_[i].estop_
         );
+        command_interfaces.emplace_back(
+            info_.joints[i].name,
+            "enable",
+            &axes_[i].enable_
+        );
     }
 
     return command_interfaces;
@@ -534,16 +539,38 @@ return_type BetterODriveHardwareInterface::write(const rclcpp::Time& time, const
             axis.send_input_torque(input_torque);
         }
 
-        if (axis.last_movement_.seconds() + idle_timeout_ < time.seconds()) {
-            // Axis timed out
-            axis.send_axis_state(ODriveAxisState::AXIS_STATE_IDLE);
-            RCLCPP_WARN_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "Axis '" << axis.node_id_ << "' timed out");
-        } 
-        else if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_IDLE) {
-            axis.send_axis_state(ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL);
-            RCLCPP_INFO_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "Axis '" << axis.node_id_ << "' activated");
-        }
+        // if (axis.last_movement_.seconds() + idle_timeout_ < time.seconds()) {
+        //     // Axis timed out
+        //     axis.send_axis_state(ODriveAxisState::AXIS_STATE_IDLE);
+        //     RCLCPP_WARN_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "Axis '" << axis.node_id_ << "' timed out");
+        // } 
+        // else if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_IDLE) {
+        //     axis.send_axis_state(ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL);
+        //     RCLCPP_INFO_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "Axis '" << axis.node_id_ << "' activated");
+        // }
+        bool any_enabled = axis.pos_input_enabled_ || axis.vel_input_enabled_ || axis.torque_input_enabled_;
 
+        // if (any_enabled == 1) {
+        //     if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_IDLE) {
+        //         axis.send_axis_state(ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL);
+        //     }
+        // } else {
+        //     if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL) {
+        //         axis.send_axis_state(ODriveAxisState::AXIS_STATE_IDLE);
+        //     }
+        // }
+        RCLCPP_INFO_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, 
+            "Enable for axis: " << axis.node_id_ << " state: " << axis.enable_);
+
+        if (axis.enable_ > 0.5 && any_enabled) {
+            if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_IDLE) {
+                axis.send_axis_state(ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL);
+            }
+        } else {
+            if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL) {
+                axis.send_axis_state(ODriveAxisState::AXIS_STATE_IDLE);
+            }
+        }
     }
 
     return return_type::OK;
