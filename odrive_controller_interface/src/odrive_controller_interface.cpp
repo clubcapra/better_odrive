@@ -39,58 +39,249 @@ using MapOfReferencesToCommandInterfaces = std::unordered_map<
   std::string, std::reference_wrapper<hardware_interface::LoanedCommandInterface>>;
 
 template <typename T>
-class RealtimeValues {
+class AtomicEventArray {
 public:
 
-    RealtimeValues() {}
-    RealtimeValues(size_t size) {
-        _values = new std::atomic<T>[size];
-        _available = new std::atomic<bool>[size];
-        _size = size;
+    AtomicEventArray() noexcept {}
+    AtomicEventArray(size_t size) noexcept {
+        reserve(size);
+    }
+    AtomicEventArray(size_t size, const T& v) noexcept {
+        resize(size, v);
     }
 
-    void resize(size_t size, const T& v) {
-        delete[] _values;
-        delete[] _available;
+    void reserve(size_t size) noexcept {
+        if (_values) {
+            delete[] _values;
+        }
+        if (_available) {
+            delete[] _available;
+        }
         _values = new std::atomic<T>[size];
         _available = new std::atomic<bool>[size];
         _size = size;
         for (int i = 0; i < size; ++i) {
-            _values[i] = v;
-            _available[i] = false;
+            _available[i].store(false, std::memory_order_relaxed);
         }
     }
 
-    operator bool() const {
+    void reserve(size_t size) volatile noexcept {
+        if (_values) {
+            delete[] _values;
+        }
+        if (_available) {
+            delete[] _available;
+        }
+        _values = new std::atomic<T>[size];
+        _available = new std::atomic<bool>[size];
+        _size = size;
+        for (int i = 0; i < size; ++i) {
+            _available[i].store(false, std::memory_order_relaxed);
+        }
+    }
+
+    void resize(size_t size, const T& v) noexcept {
+        if (_values) {
+            delete[] _values;
+        }
+        if (_available) {
+            delete[] _available;
+        }
+        _values = new std::atomic<T>[size];
+        _available = new std::atomic<bool>[size];
+        _size = size;
+        for (int i = 0; i < size; ++i) {
+            _values[i].store(v, std::memory_order_relaxed);
+            _available[i].store(false, std::memory_order_relaxed);
+        }
+    }
+
+    void resize(size_t size, const T& v) volatile noexcept {
+        if (_values) {
+            delete[] _values;
+        }
+        if (_available) {
+            delete[] _available;
+        }
+        _values = new std::atomic<T>[size];
+        _available = new std::atomic<bool>[size];
+        _size = size;
+        for (int i = 0; i < size; ++i) {
+            _values[i].store(v, std::memory_order_relaxed);
+            _available[i].store(false, std::memory_order_relaxed);
+        }
+    }
+
+    operator bool() const noexcept {
         for (auto i = _available; i < _available + _size; ++i) {
-            if (*i) return true;
+            if (i->load(std::memory_order_relaxed)) return true;
         }
         return false;
     }
 
-    void write(size_t i, const T& v) {
-        _values[i] = v;
-        _available[i] = true;
+    operator bool() const volatile noexcept {
+        for (auto i = _available; i < _available + _size; ++i) {
+            if (i->load(std::memory_order_relaxed)) return true;
+        }
+        return false;
     }
 
-    bool read(size_t i, T& v) {
+    bool write(size_t i, T v) noexcept {
+        if (i >= _size) return false;
+        _values[i].store(v, std::memory_order_relaxed);
+        _available[i].store(true, std::memory_order_relaxed);
+        return true;
+    }
+
+    bool write(size_t i, T v) volatile noexcept {
+        if (i >= _size) return false;
+        _values[i].store(v, std::memory_order_relaxed);
+        _available[i].store(true, std::memory_order_relaxed);
+        return true;
+    }
+
+    bool read(size_t i, T& v) noexcept {
+        if (i >= _size) return false;
         if (_available[i]) {
-            v = _values[i];
-            _available[i] = false;
+            v = _values[i].load(std::memory_order_relaxed);
+            _available[i].store(false, std::memory_order_relaxed);
             return true;
         }
         return false;
     }
 
-    ~RealtimeValues() {
-        delete[] _values;
-        delete[] _available;
+    bool read(size_t i, T& v) volatile noexcept {
+        if (i >= _size) return false;
+        if (_available[i]) {
+            v = _values[i].load(std::memory_order_relaxed);
+            _available[i].store(false, std::memory_order_relaxed);
+            return true;
+        }
+        return false;
+    }
+
+    bool read_without_notify(size_t i, T& v) const noexcept {
+        if (i >= _size) return false;
+        if (_available[i]) {
+            v = _values[i].load(std::memory_order_relaxed);
+            return true;
+        }
+        return false;
+    }
+
+    bool read_without_notify(size_t i, T& v) const volatile noexcept {
+        if (i >= _size) return false;
+        if (_available[i]) {
+            v = _values[i].load(std::memory_order_relaxed);
+            return true;
+        }
+        return false;
+    }
+
+    void clear_events() noexcept {
+        for (auto i = _available; i < _available + _size; ++i) {
+            i->store(false, std::memory_order_relaxed);
+        }
+    }
+
+    void clear_events() volatile noexcept {
+        for (auto i = _available; i < _available + _size; ++i) {
+            i->store(false, std::memory_order_relaxed);
+        }
+    }
+
+    ~AtomicEventArray() noexcept {
+        if (_values) {
+            delete[] _values;
+            _values = nullptr;
+        }
+        if (_available) {
+            delete[] _available;
+            _available = nullptr;
+        }
     }
 
 private:
     size_t _size;
     std::atomic<bool>* _available;
     std::atomic<T>* _values;
+};
+
+template <typename T>
+class AtomicArray {
+public:
+    AtomicArray() noexcept {}
+    AtomicArray(size_t size) noexcept {
+        reserve(size);
+    }
+    AtomicArray(size_t size, T v) noexcept {
+        resize(size, v);
+    }
+
+    void reserve(size_t size) noexcept {
+        if (_values) {
+            delete[] _values;
+        }
+        _values = new std::atomic<T>[size];
+        _size = size;
+    }
+
+    void resize(size_t size, T v) noexcept {
+        if (_values) {
+            delete[] _values;
+        }
+        _values = new std::atomic<T>[size];
+        _size = size;
+        for (int i = 0; i < size; ++i) {
+            _values[i] = v;
+        }
+    }
+
+    void resize(size_t size, T v) volatile noexcept {
+        if (_values) {
+            delete[] _values;
+        }
+        _values = new std::atomic<T>[size];
+        _size = size;
+        for (int i = 0; i < size; ++i) {
+            _values[i].store(v, std::memory_order_relaxed);
+        }
+    }
+
+    bool write(size_t i, T v) noexcept {
+        if (i >= _size) return false;
+        _values[i].store(v, std::memory_order_relaxed);
+        return true;
+    }
+
+    bool write(size_t i, T v) volatile noexcept {
+        if (i >= _size) return false;
+        _values[i].store(v, std::memory_order_relaxed);
+        return true;
+    }
+
+    bool read(size_t i, T& v) const noexcept {
+        if (i >= _size) return false;
+        v = _values[i].load(std::memory_order_relaxed);
+        return true;
+    }
+
+    bool read(size_t i, T& v) const volatile noexcept {
+        if (i >= _size) return false;
+        v = _values[i].load(std::memory_order_relaxed);
+        return true;
+    }
+
+    ~AtomicArray() noexcept {
+        if (_values) {
+            delete[] _values;
+            _values = nullptr;
+        }
+    }
+
+private:
+    size_t _size = 0;
+    std::atomic<T>* _values = nullptr;
 };
 
 class BetterODriveControllerInterface : public controller_interface::ControllerInterface {
@@ -127,23 +318,20 @@ protected:
     Params params_;
 
     // Subscribers
-    // rclcpp::Subscription<BoolMsg>::SharedPtr estop_sub_{};
-    // rclcpp::Subscription<JointBoolMsg>::SharedPtr enable_sub_{};
     std::vector<rclcpp::Subscription<BoolMsg>::SharedPtr> enable_subs_ = {};
 
     // Clients
-    // rclcpp::Service<TriggerSrv>::SharedPtr clear_all_errors_srv_{};
-    // rclcpp::Service<ClearErrorSrv>::SharedPtr clear_errors_srv_{};
-    // rclcpp::Service<SetAbsolutePositionSrv>::SharedPtr set_absolute_position_srv_{};
+    rclcpp::Service<TriggerSrv>::SharedPtr clear_all_errors_srv_{};
+    rclcpp::Service<ClearErrorSrv>::SharedPtr clear_errors_srv_{};
+    rclcpp::Service<SetAbsolutePositionSrv>::SharedPtr set_absolute_position_srv_{};
 
     // Joints
     std::vector<std::string> joint_names_ = {};
     std::vector<std::string> absolute_joint_names_ = {};
 
-    // RealtimeThreadSafeBox<BoolMsg> rt_estop_;
-    // RealtimeValues<bool> rt_enable_;
-    // RealtimeThreadSafeBox<SetAbsolutePositionSrv> rt_set_position_;
-    std::atomic_bool* joint_enables_ = nullptr;
+    // Command values
+    
+    volatile AtomicArray<bool> joint_enables_ = {};
 };
 
 
@@ -179,7 +367,8 @@ controller_interface::CallbackReturn BetterODriveControllerInterface::on_configu
         // clear_errors_cmd_.resize(joint_names_.size(), false);
         // rt_enable_.resize(joint_names_.size(), false);
         enable_subs_.reserve(joint_names_.size());
-        joint_enables_ = new std::atomic_bool[joint_names_.size()];
+        // joint_enables_ = new std::atomic_bool[joint_names_.size()];
+        joint_enables_.resize(joint_names_.size(), false);
         
         // Register absolute joints
         for (auto joint_name : params_.absolute_position_names) {
@@ -209,12 +398,12 @@ controller_interface::CallbackReturn BetterODriveControllerInterface::on_configu
         //         }
         //     });
         for (int i = 0; i < joint_names_.size(); ++i) {
-            joint_enables_[i] = false;
+            joint_enables_.write(i, false);
             enable_subs_.emplace_back(get_node()->create_subscription<BoolMsg>(
                 "~/enable/" + joint_names_[i], rclcpp::SystemDefaultsQoS(),
                 [this, i](const BoolMsg::SharedPtr msg) {
                     if (msg) {
-                        joint_enables_[i].store(msg->data, std::memory_order_relaxed);
+                        joint_enables_.write(i, msg->data);
                     }
                 }
             ));
@@ -344,10 +533,10 @@ controller_interface::CallbackReturn BetterODriveControllerInterface::on_deactiv
 
 controller_interface::CallbackReturn BetterODriveControllerInterface::on_cleanup(const rclcpp_lifecycle::State &previous_state)
 {
-    if (joint_enables_) {
-        delete[] joint_enables_;
-        joint_enables_ = nullptr;
-    }
+    // if (joint_enables_) {
+    //     delete[] joint_enables_;
+    //     joint_enables_ = nullptr;
+    // }
     return controller_interface::CallbackReturn::SUCCESS;
 }
 
@@ -397,7 +586,10 @@ controller_interface::return_type BetterODriveControllerInterface::update(const 
             // else {
             //     command_interfaces_map_.at(joint_names_[i] + "/enable").get().set_value(-1);
             // }
-            command_interfaces_map_.at(joint_names_[i] + "/enable").get().set_value(joint_enables_[i] ? 1.0 : 0.0);
+            bool enable = false;
+            if (joint_enables_.read(i, enable)) {
+                command_interfaces_map_.at(joint_names_[i] + "/enable").get().set_value(enable ? 1.0 : 0.0);
+            }
         }
     
         for (int i = 0; i < absolute_joint_names_.size(); ++i) {
