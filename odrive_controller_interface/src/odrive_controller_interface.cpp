@@ -323,7 +323,7 @@ protected:
     // Subscribers
     std::vector<rclcpp::Subscription<BoolMsg>::SharedPtr> enable_subs_ = {};
 
-    // Clients
+    // Services
     rclcpp::Service<TriggerSrv>::SharedPtr clear_all_errors_srv_{};
     rclcpp::Service<ClearErrorSrv>::SharedPtr clear_errors_srv_{};
     rclcpp::Service<SetAbsolutePositionSrv>::SharedPtr set_absolute_position_srv_{};
