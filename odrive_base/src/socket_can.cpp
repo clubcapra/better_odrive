@@ -10,6 +10,8 @@
 #include <cerrno>
 #include <net/if.h>
 #include <sys/ioctl.h>
+#include "utils.hpp"
+
 
 bool SocketCanIntf::init(const std::string& interface, EpollEventLoop* event_loop, FrameProcessor frame_processor) {
     interface_ = interface;
@@ -89,9 +91,10 @@ void SocketCanIntf::deinit() {
 }
 
 bool SocketCanIntf::send_can_frame(const can_frame& frame) {
+    LOG_INIT();
     ssize_t nbytes = write(socket_id_, &frame, sizeof(frame));
     if (nbytes != static_cast<ssize_t>(sizeof(frame))) {
-        std::cerr << "Failed to send CAN frame: " << strerror(errno) << std::endl;
+        LOG_THROTTLE(1000, std::cerr << "Failed to send CAN frame: " << strerror(errno) << std::endl);
         return false;
     }
 
@@ -99,16 +102,17 @@ bool SocketCanIntf::send_can_frame(const can_frame& frame) {
 }
 
 void SocketCanIntf::on_socket_event(uint32_t mask) {
+    LOG_INIT();
     if (mask & EPOLLIN) {
         while (read_nonblocking() && !broken_);
     }
     if (mask & EPOLLERR) {
-        std::cerr << "interface disappeared" << std::endl;
+        LOG_THROTTLE(1000, std::cerr << "interface disappeared" << std::endl);
         deinit();
         return;
     }
     if (mask & ~(EPOLLIN | EPOLLERR)) {
-        std::cerr << "unexpected event " << mask << std::endl;
+        LOG_THROTTLE(1000, std::cerr << "unexpected event " << mask << std::endl);
         deinit();
         return;
     }
@@ -116,6 +120,7 @@ void SocketCanIntf::on_socket_event(uint32_t mask) {
 }
 
 bool SocketCanIntf::read_nonblocking() {
+    LOG_INIT();
     struct can_frame frame;
     struct cmsghdr ctrlmsg;
 
@@ -136,13 +141,13 @@ bool SocketCanIntf::read_nonblocking() {
             // std::cerr << "no message received" << std::endl;
             return false;
         } else {
-            std::cerr << "Socket read failed: " << std::endl;
+            LOG_THROTTLE(1000, std::cerr << "Socket read failed: " << std::endl);
             return false;
         }
     }
 
     if (n_received < static_cast<ssize_t>(sizeof(struct can_frame))) {
-        std::cerr << "invalid message length " << n_received << std::endl;
+        LOG_THROTTLE(1000, std::cerr << "invalid message length " << n_received << std::endl);
         return true;
     }
 

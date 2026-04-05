@@ -1,4 +1,5 @@
 #include "epoll_event_loop.hpp"
+#include "utils.hpp"
 
 EpollEventLoop::EpollEventLoop() {
     epollfd = epoll_create1(0);
@@ -85,9 +86,10 @@ bool EpollEvent::set() {
 }
 
 void EpollEvent::on_trigger(uint32_t event_id) {
+    LOG_INIT();
     uint64_t val;
     if (read(fd_, &val, sizeof(val)) != sizeof(val)) {
-        std::cerr << "Failed to read eventfd" << std::endl;
+        LOG_THROTTLE(1000, std::cerr << "Failed to read eventfd" << std::endl);
         return;
     }
 
