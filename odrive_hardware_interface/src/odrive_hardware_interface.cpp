@@ -728,70 +728,70 @@ void Axis::on_can_msg(const rclcpp::Time& time, const can_frame& frame) {
     }
     if (active_errors_ != ODriveError::ODRIVE_ERROR_NONE) {
         if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_INITIALIZING) == ODriveError::ODRIVE_ERROR_INITIALIZING) {
-            RCLCPP_ERROR(rclcpp::get_logger("BetterODriveHardwareInterface"), "ODrive %d error: ODRIVE_ERROR_INITIALIZING", node_id_);
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_INITIALIZING", node_id_);
         }
         if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_SYSTEM_LEVEL) == ODriveError::ODRIVE_ERROR_SYSTEM_LEVEL) {
-            RCLCPP_ERROR(rclcpp::get_logger("BetterODriveHardwareInterface"), "ODrive %d error: ODRIVE_ERROR_SYSTEM_LEVEL", node_id_);
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_SYSTEM_LEVEL", node_id_);
         }
         if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_TIMING_ERROR) == ODriveError::ODRIVE_ERROR_TIMING_ERROR) {
-            RCLCPP_ERROR(rclcpp::get_logger("BetterODriveHardwareInterface"), "ODrive %d error: ODRIVE_ERROR_TIMING_ERROR", node_id_);
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_TIMING_ERROR", node_id_);
         }
         if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_MISSING_ESTIMATE) == ODriveError::ODRIVE_ERROR_MISSING_ESTIMATE) {
-            RCLCPP_ERROR(rclcpp::get_logger("BetterODriveHardwareInterface"), "ODrive %d error: ODRIVE_ERROR_MISSING_ESTIMATE", node_id_);
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_MISSING_ESTIMATE", node_id_);
         }
         if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_BAD_CONFIG) == ODriveError::ODRIVE_ERROR_BAD_CONFIG) {
-            RCLCPP_ERROR(rclcpp::get_logger("BetterODriveHardwareInterface"), "ODrive %d error: ODRIVE_ERROR_BAD_CONFIG", node_id_);
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_BAD_CONFIG", node_id_);
         }
         if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_DRV_FAULT) == ODriveError::ODRIVE_ERROR_DRV_FAULT) {
-            RCLCPP_ERROR(rclcpp::get_logger("BetterODriveHardwareInterface"), "ODrive %d error: ODRIVE_ERROR_DRV_FAULT", node_id_);
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_DRV_FAULT", node_id_);
         }
         if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_MISSING_INPUT) == ODriveError::ODRIVE_ERROR_MISSING_INPUT) {
-            RCLCPP_ERROR(rclcpp::get_logger("BetterODriveHardwareInterface"), "ODrive %d error: ODRIVE_ERROR_MISSING_INPUT", node_id_);
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_MISSING_INPUT", node_id_);
         }
         if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_DC_BUS_OVER_VOLTAGE) == ODriveError::ODRIVE_ERROR_DC_BUS_OVER_VOLTAGE) {
-            RCLCPP_ERROR(rclcpp::get_logger("BetterODriveHardwareInterface"), "ODrive %d error: ODRIVE_ERROR_DC_BUS_OVER_VOLTAGE", node_id_);
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_DC_BUS_OVER_VOLTAGE", node_id_);
         }
         if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_DC_BUS_UNDER_VOLTAGE) == ODriveError::ODRIVE_ERROR_DC_BUS_UNDER_VOLTAGE) {
-            RCLCPP_ERROR(rclcpp::get_logger("BetterODriveHardwareInterface"), "ODrive %d error: ODRIVE_ERROR_DC_BUS_UNDER_VOLTAGE", node_id_);
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_DC_BUS_UNDER_VOLTAGE", node_id_);
         }
         if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_DC_BUS_OVER_CURRENT) == ODriveError::ODRIVE_ERROR_DC_BUS_OVER_CURRENT) {
-            RCLCPP_ERROR(rclcpp::get_logger("BetterODriveHardwareInterface"), "ODrive %d error: ODRIVE_ERROR_DC_BUS_OVER_CURRENT", node_id_);
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_DC_BUS_OVER_CURRENT", node_id_);
         }
         if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_DC_BUS_OVER_REGEN_CURRENT) == ODriveError::ODRIVE_ERROR_DC_BUS_OVER_REGEN_CURRENT) {
-            RCLCPP_ERROR(rclcpp::get_logger("BetterODriveHardwareInterface"), "ODrive %d error: ODRIVE_ERROR_DC_BUS_OVER_REGEN_CURRENT", node_id_);
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_DC_BUS_OVER_REGEN_CURRENT", node_id_);
         }
         if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_CURRENT_LIMIT_VIOLATION) == ODriveError::ODRIVE_ERROR_CURRENT_LIMIT_VIOLATION) {
-            RCLCPP_ERROR(rclcpp::get_logger("BetterODriveHardwareInterface"), "ODrive %d error: ODRIVE_ERROR_CURRENT_LIMIT_VIOLATION", node_id_);
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_CURRENT_LIMIT_VIOLATION", node_id_);
         }
         if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_MOTOR_OVER_TEMP) == ODriveError::ODRIVE_ERROR_MOTOR_OVER_TEMP) {
-            RCLCPP_ERROR(rclcpp::get_logger("BetterODriveHardwareInterface"), "ODrive %d error: ODRIVE_ERROR_MOTOR_OVER_TEMP", node_id_);
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_MOTOR_OVER_TEMP", node_id_);
         }
         if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_INVERTER_OVER_TEMP) == ODriveError::ODRIVE_ERROR_INVERTER_OVER_TEMP) {
-            RCLCPP_ERROR(rclcpp::get_logger("BetterODriveHardwareInterface"), "ODrive %d error: ODRIVE_ERROR_INVERTER_OVER_TEMP", node_id_);
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_INVERTER_OVER_TEMP", node_id_);
         }
         if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_VELOCITY_LIMIT_VIOLATION) == ODriveError::ODRIVE_ERROR_VELOCITY_LIMIT_VIOLATION) {
-            RCLCPP_ERROR(rclcpp::get_logger("BetterODriveHardwareInterface"), "ODrive %d error: ODRIVE_ERROR_VELOCITY_LIMIT_VIOLATION", node_id_);
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_VELOCITY_LIMIT_VIOLATION", node_id_);
         }
         if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_POSITION_LIMIT_VIOLATION) == ODriveError::ODRIVE_ERROR_POSITION_LIMIT_VIOLATION) {
-            RCLCPP_ERROR(rclcpp::get_logger("BetterODriveHardwareInterface"), "ODrive %d error: ODRIVE_ERROR_POSITION_LIMIT_VIOLATION", node_id_);
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_POSITION_LIMIT_VIOLATION", node_id_);
         }
         if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_WATCHDOG_TIMER_EXPIRED) == ODriveError::ODRIVE_ERROR_WATCHDOG_TIMER_EXPIRED) {
-            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, "ODrive %d error: ODRIVE_ERROR_WATCHDOG_TIMER_EXPIRED", node_id_);
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_WATCHDOG_TIMER_EXPIRED", node_id_);
         }
         if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_ESTOP_REQUESTED) == ODriveError::ODRIVE_ERROR_ESTOP_REQUESTED) {
-            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, "ODrive %d error: ODRIVE_ERROR_ESTOP_REQUESTED", node_id_);
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_ESTOP_REQUESTED", node_id_);
         }
         if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_SPINOUT_DETECTED) == ODriveError::ODRIVE_ERROR_SPINOUT_DETECTED) {
-            RCLCPP_ERROR(rclcpp::get_logger("BetterODriveHardwareInterface"), "ODrive %d error: ODRIVE_ERROR_SPINOUT_DETECTED", node_id_);
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_SPINOUT_DETECTED", node_id_);
         }
         if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_BRAKE_RESISTOR_DISARMED) == ODriveError::ODRIVE_ERROR_BRAKE_RESISTOR_DISARMED) {
-            RCLCPP_ERROR(rclcpp::get_logger("BetterODriveHardwareInterface"), "ODrive %d error: ODRIVE_ERROR_BRAKE_RESISTOR_DISARMED", node_id_);
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_BRAKE_RESISTOR_DISARMED", node_id_);
         }
         if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_THERMISTOR_DISCONNECTED) == ODriveError::ODRIVE_ERROR_THERMISTOR_DISCONNECTED) {
-            RCLCPP_ERROR(rclcpp::get_logger("BetterODriveHardwareInterface"), "ODrive %d error: ODRIVE_ERROR_THERMISTOR_DISCONNECTED", node_id_);
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_THERMISTOR_DISCONNECTED", node_id_);
         }
         if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_CALIBRATION_ERROR) == ODriveError::ODRIVE_ERROR_CALIBRATION_ERROR) {
-            RCLCPP_ERROR(rclcpp::get_logger("BetterODriveHardwareInterface"), "ODrive %d error: ODRIVE_ERROR_CALIBRATION_ERROR", node_id_);
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_CALIBRATION_ERROR", node_id_);
         }
     }
 }
