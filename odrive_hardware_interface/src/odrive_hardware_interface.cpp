@@ -776,10 +776,10 @@ void Axis::on_can_msg(const rclcpp::Time& time, const can_frame& frame) {
             RCLCPP_ERROR(rclcpp::get_logger("BetterODriveHardwareInterface"), "ODrive %d error: ODRIVE_ERROR_POSITION_LIMIT_VIOLATION", node_id_);
         }
         if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_WATCHDOG_TIMER_EXPIRED) == ODriveError::ODRIVE_ERROR_WATCHDOG_TIMER_EXPIRED) {
-            RCLCPP_ERROR(rclcpp::get_logger("BetterODriveHardwareInterface"), "ODrive %d error: ODRIVE_ERROR_WATCHDOG_TIMER_EXPIRED", node_id_);
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, "ODrive %d error: ODRIVE_ERROR_WATCHDOG_TIMER_EXPIRED", node_id_);
         }
         if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_ESTOP_REQUESTED) == ODriveError::ODRIVE_ERROR_ESTOP_REQUESTED) {
-            RCLCPP_ERROR(rclcpp::get_logger("BetterODriveHardwareInterface"), "ODrive %d error: ODRIVE_ERROR_ESTOP_REQUESTED", node_id_);
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, "ODrive %d error: ODRIVE_ERROR_ESTOP_REQUESTED", node_id_);
         }
         if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_SPINOUT_DETECTED) == ODriveError::ODRIVE_ERROR_SPINOUT_DETECTED) {
             RCLCPP_ERROR(rclcpp::get_logger("BetterODriveHardwareInterface"), "ODrive %d error: ODRIVE_ERROR_SPINOUT_DETECTED", node_id_);
