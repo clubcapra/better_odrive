@@ -57,14 +57,13 @@ struct Axis {
 
     SocketCanIntf* can_intf_;
     uint32_t node_id_;
-    rclcpp::Time last_estop_timestamp_;
-    rclcpp::Time last_movement_;
 
     // Commands (ros2_control => ODrives)
     double pos_setpoint_ = 0.0; // [rad]
     double vel_setpoint_ = 0.0; // [rad/s]
     double torque_setpoint_ = 0.0; // [Nm]
     double estop_ = -1.0;
+    double enable_ = -1.0;
     trigger_command clear_errors_cmd_ = 0.0;
     double set_absolute_pos_ = 0.0; // [rad]
     trigger_command set_absolute_pos_cmd_ = 0.0;
@@ -97,7 +96,6 @@ struct Axis {
     uint8_state fw_version_minor_ = 0;
     uint8_state fw_version_revision_ = 0;
     uint8_state fw_version_unreleased_ = 0;
-
 
     // Indicates which controller inputs are enabled. This is configured by the
     // controller that sits on top of this hardware interface. Multiple inputs
@@ -204,6 +202,11 @@ using namespace odrive_hardware_interface;
 
 using hardware_interface::CallbackReturn;
 using hardware_interface::return_type;
+
+bool error_ok_to_clear(const Axis& axis) {
+    auto errors = (uint32_t)axis.active_errors_;
+    return errors == ODriveError::ODRIVE_ERROR_NONE || errors == ODriveError::ODRIVE_ERROR_WATCHDOG_TIMER_EXPIRED;
+}
 
 CallbackReturn BetterODriveHardwareInterface::on_init(const hardware_interface::HardwareInfo& info) {
     if (hardware_interface::SystemInterface::on_init(info) != CallbackReturn::SUCCESS) {
@@ -371,23 +374,23 @@ std::vector<hardware_interface::CommandInterface> BetterODriveHardwareInterface:
         ));
         command_interfaces.emplace_back(
             info_.joints[i].name,
-            "set_absolute_pos",
+            "set_absolute_position",
             &axes_[i].set_absolute_pos_
-        );
-        command_interfaces.emplace_back(
-            info_.joints[i].name,
-            "set_absolute_pos_cmd",
-            &axes_[i].set_absolute_pos_cmd_
         );
         command_interfaces.emplace_back(
             info_.joints[i].name,
             "clear_errors_cmd",
             &axes_[i].clear_errors_cmd_
         );
+        // command_interfaces.emplace_back(
+        //     info_.joints[i].name,
+        //     "estop",
+        //     &axes_[i].estop_
+        // );
         command_interfaces.emplace_back(
             info_.joints[i].name,
-            "estop",
-            &axes_[i].estop_
+            "enable",
+            &axes_[i].enable_
         );
     }
 
@@ -436,7 +439,7 @@ return_type BetterODriveHardwareInterface::perform_command_mode_switch(
             } else if (axis.vel_input_enabled_) {
                 RCLCPP_INFO(rclcpp::get_logger("BetterODriveHardwareInterface"), "Setting %s to velocity control", info_.joints[i].name.c_str());
                 control = ODriveControlMode::CONTROL_MODE_VELOCITY_CONTROL;
-                input = ODriveInputMode::INPUT_MODE_PASSTHROUGH;
+                input = ODriveInputMode::INPUT_MODE_VEL_RAMP;
             } else {
                 RCLCPP_INFO(rclcpp::get_logger("BetterODriveHardwareInterface"), "Setting %s to torque control", info_.joints[i].name.c_str());
                 control = ODriveControlMode::CONTROL_MODE_TORQUE_CONTROL;
@@ -446,13 +449,10 @@ return_type BetterODriveHardwareInterface::perform_command_mode_switch(
             bool any_enabled = axis.pos_input_enabled_ || axis.vel_input_enabled_ || axis.torque_input_enabled_;
 
             if (any_enabled) {
-                axis.send_controller_mode(control, input); // Set control mode
+                if (error_ok_to_clear(axis)) {
+                    axis.send_controller_mode(control, input); // Set control mode
+                }
             }
-
-            // Set axis state
-            axis.send_clear_errors();
-
-            axis.send_axis_state(any_enabled ? AXIS_STATE_CLOSED_LOOP_CONTROL : AXIS_STATE_IDLE);
         }
     }
 
@@ -470,73 +470,79 @@ return_type BetterODriveHardwareInterface::read(const rclcpp::Time& timestamp, c
 }
 
 return_type BetterODriveHardwareInterface::write(const rclcpp::Time& time, const rclcpp::Duration&) {
+    static auto clk = rclcpp::Clock();
     for (auto& axis : axes_) {
+        // Set absolute position
+        if (!std::isnan(axis.set_absolute_pos_)) {
+            RCLCPP_WARN_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, 
+                "Seting absolute position for axis '" << axis.node_id_ << "' to '" << axis.set_absolute_pos_ << "'");
+            axis.send_absolute_position(axis.set_absolute_pos_);
+        }
+
+        // // E-Stop
+        // if (axis.estop_ < 0.0 && (axis.last_estop_timestamp_.seconds() + estop_timeout_) > time.seconds()) {
+        //     // Timed out call estop
+        //     axis.send_estop_state(true);
+        //     RCLCPP_WARN_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, 
+        //         "EStop timed out for axis '" << axis.node_id_ << "'");
+        //     return return_type::OK;
+        // } else if (axis.estop_ > 0.0) {
+        //     RCLCPP_INFO_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, 
+        //         "EStop called for axis '" << axis.node_id_ << "'");
+        //     axis.send_estop_state(true);
+        //     axis.last_estop_timestamp_ = time;
+        //     return return_type::OK;
+        // } else {
+        //     RCLCPP_DEBUG_STREAM(rclcpp::get_logger("BetterODriveHardwareInterface"), 
+        //         "EStop updated for axis '" << axis.node_id_ << "'");
+        //     axis.send_estop_state(false);
+        //     axis.last_estop_timestamp_ = time;
+        // }
+        // axis.estop_ = -1.0; // Reset command
+        axis.send_estop_state(false);
+
+        // Clear errors
+        if (axis.clear_errors_cmd_ > 0.5) {
+            RCLCPP_INFO_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, 
+                "Clearing errors for axis '" << axis.node_id_ << "'");
+            axis.send_clear_errors();
+            axis.clear_errors_cmd_ = 0.0; // Consume command
+        }
+
         // Send the CAN message that fits the set of enabled setpoints
         if (axis.pos_input_enabled_) {
             float input_pos = axis.pos_setpoint_;
             float vel_ff = axis.vel_input_enabled_ ? axis.vel_setpoint_ : 0.0f;
             float torque_ff = axis.torque_input_enabled_ ? axis.torque_setpoint_ : 0.0f;
-            if (!(-0.1 < (input_pos - axis.pos_estimate_) < 0.1)) {
-                // Significant movement
-                if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_IDLE) {
-                    axis.send_axis_state(ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL);
-                    axis.last_movement_ = time;
-                }
+            if (error_ok_to_clear(axis)) {
+                axis.send_input_pos(input_pos, vel_ff, torque_ff);
             }
-            axis.send_input_pos(input_pos, vel_ff, torque_ff);
         } else if (axis.vel_input_enabled_) {
             float input_vel = axis.vel_setpoint_;
             float input_torque_ff = axis.torque_input_enabled_ ? axis.torque_setpoint_ : 0.0f;
-            if (!(-0.1 < input_vel < 0.1)) {
-                // Significant movement
-                if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_IDLE) {
-                    axis.send_axis_state(ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL);
-                    axis.last_movement_ = time;
-                }
+            RCLCPP_INFO_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, 
+                "Velocity for axis '" << axis.node_id_ << "' is: " << axis.vel_setpoint_);
+            if (error_ok_to_clear(axis)) {
+                axis.send_input_vel(input_vel, input_torque_ff);
             }
-            axis.send_input_vel(input_vel, input_torque_ff);
         } else if (axis.torque_input_enabled_) {
             float input_torque = axis.torque_setpoint_;
-            if (!(-0.001 < (input_torque - axis.pos_estimate_) < 0.001)) {
-                // Significant movement
-                if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_IDLE) {
-                    axis.send_axis_state(ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL);
-                    axis.last_movement_ = time;
-                }
+            if (error_ok_to_clear(axis)) {
+                axis.send_input_torque(input_torque);
             }
-            axis.send_input_torque(input_torque);
         }
 
-        if (axis.last_movement_.seconds() + idle_timeout_ < time.seconds()) {
-            // Axis timed out
-            axis.send_axis_state(ODriveAxisState::AXIS_STATE_IDLE);
-        }
+        bool any_enabled = axis.pos_input_enabled_ || axis.vel_input_enabled_ || axis.torque_input_enabled_;
 
-        // Clear errors
-        if (axis.clear_errors_cmd_ != 0.0) {
-            axis.send_clear_errors();
-            axis.clear_errors_cmd_ = 0.0; // Consume command
-        }
-
-        // Set absolute position
-        if (axis.set_absolute_pos_cmd_ != 0.0) {
-            axis.send_absolute_position(axis.set_absolute_pos_);
-            axis.set_absolute_pos_cmd_ = 0.0; // Consume command
-        }
-
-        // E-Stop
-        if (axis.estop_ < 0.0 && (axis.last_estop_timestamp_.seconds() + estop_timeout_) > time.seconds()) {
-            // Timed out call estop
-            axis.send_estop_state(true);
-        } else if (axis.estop_ > 0.0) {
-            axis.send_estop_state(true);
-            axis.last_estop_timestamp_ = time;
+        if (axis.enable_ > 0.5 && any_enabled) {
+            if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_IDLE && error_ok_to_clear(axis)) {
+                axis.send_axis_state(ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL);
+            }
         } else {
-            axis.send_estop_state(false);
-            axis.last_estop_timestamp_ = time;
+            if (axis.axis_state_ == ODriveAxisState::AXIS_STATE_CLOSED_LOOP_CONTROL && error_ok_to_clear(axis)) {
+                axis.send_axis_state(ODriveAxisState::AXIS_STATE_IDLE);
+            }
         }
-        axis.estop_ = -1.0; // Reset command
-
     }
 
     return return_type::OK;
@@ -569,7 +575,7 @@ void Axis::send_clear_errors(const uint8_t& identify) {
     send(msg);
 }
 
-void odrive_hardware_interface::Axis::send_input_pos(const double &input_pos, const double &velocity_feed_forward, const double &torque_feed_forward)
+void Axis::send_input_pos(const double &input_pos, const double &velocity_feed_forward, const double &torque_feed_forward)
 {
     Set_Input_Pos_msg_t msg;
     msg.Input_Pos = input_pos / (2 * M_PI);
@@ -578,7 +584,7 @@ void odrive_hardware_interface::Axis::send_input_pos(const double &input_pos, co
     send(msg);
 }
 
-void odrive_hardware_interface::Axis::send_input_vel(const double &velocity, const double &torque_feed_forward)
+void Axis::send_input_vel(const double &velocity, const double &torque_feed_forward)
 {
     Set_Input_Vel_msg_t msg;
     msg.Input_Vel = velocity / (2 * M_PI);
@@ -586,30 +592,33 @@ void odrive_hardware_interface::Axis::send_input_vel(const double &velocity, con
     send(msg);
 }
 
-void odrive_hardware_interface::Axis::send_input_torque(const double &torque)
+void Axis::send_input_torque(const double &torque)
 {
     Set_Input_Torque_msg_t msg;
     msg.Input_Torque = torque;
     send(msg);
 }
 
-void odrive_hardware_interface::Axis::send_estop_state(const bool &estop)
+void Axis::send_estop_state(const bool &estop)
 {
     Estop_msg_t msg;
     if (estop) {
         send(msg);
     } else {
-        send_clear_errors();
+        if (axis_state_ == ODriveError::ODRIVE_ERROR_ESTOP_REQUESTED) {
+            send_clear_errors();
+        }
     }
 }
 
-void odrive_hardware_interface::Axis::send_absolute_position(const double &position)
+void Axis::send_absolute_position(const double &position)
 {
     Set_Absolute_Position_msg_t msg;
     msg.Position = position / (2 * M_PI);
+    send(msg);
 }
 
-void odrive_hardware_interface::Axis::send_limits(const double &velocity_limit, const double &current_limit)
+void Axis::send_limits(const double &velocity_limit, const double &current_limit)
 {
     Set_Limits_msg_t msg;
     msg.Velocity_Limit = velocity_limit / (2 * M_PI);
@@ -617,14 +626,14 @@ void odrive_hardware_interface::Axis::send_limits(const double &velocity_limit, 
     send(msg);
 }
 
-void odrive_hardware_interface::Axis::send_trajectory_vel_limit(const double &limit)
+void Axis::send_trajectory_vel_limit(const double &limit)
 {
     Set_Traj_Vel_Limit_msg_t msg;
     msg.Traj_Vel_Limit = limit / (2 * M_PI);
     send(msg);
 }
 
-void odrive_hardware_interface::Axis::send_trajectory_accel_limits(const double &accel_limit, const double &decel_limit)
+void Axis::send_trajectory_accel_limits(const double &accel_limit, const double &decel_limit)
 {
     Set_Traj_Accel_Limits_msg_t msg;
     msg.Traj_Accel_Limit = accel_limit / (2 * M_PI);
@@ -632,7 +641,7 @@ void odrive_hardware_interface::Axis::send_trajectory_accel_limits(const double 
     send(msg);
 }
 
-void odrive_hardware_interface::Axis::send_trajectory_inertia(const double &inertia)
+void Axis::send_trajectory_inertia(const double &inertia)
 {
     Set_Traj_Inertia_msg_t msg;
     msg.Traj_Inertia = inertia * (2 * M_PI);
@@ -640,8 +649,9 @@ void odrive_hardware_interface::Axis::send_trajectory_inertia(const double &iner
 }
 
 void Axis::on_can_msg(const rclcpp::Time& time, const can_frame& frame) {
+    static auto clk = rclcpp::Clock();
     uint8_t cmd = frame.can_id & 0x1f;
-
+    
     auto try_decode = [&]<typename TMsg>(TMsg& msg) {
         if (frame.can_dlc < Get_Encoder_Estimates_msg_t::msg_length) {
             RCLCPP_WARN(rclcpp::get_logger("BetterODriveHardwareInterface"), "message %d too short", cmd);
@@ -656,10 +666,6 @@ void Axis::on_can_msg(const rclcpp::Time& time, const can_frame& frame) {
             if (Get_Encoder_Estimates_msg_t msg; try_decode(msg)) {
                 pos_estimate_ = msg.Pos_Estimate * (2 * M_PI);
                 vel_estimate_ = msg.Vel_Estimate * (2 * M_PI);
-                if (!(-0.1 < vel_estimate_ < 0.1)) {
-                    // Minimal movement
-                    last_movement_ = time;
-                }
             }
         } break;
         case Get_Torques_msg_t::cmd_id: {
@@ -719,6 +725,74 @@ void Axis::on_can_msg(const rclcpp::Time& time, const can_frame& frame) {
             }
         } break;
             // silently ignore unimplemented command IDs
+    }
+    if (active_errors_ != ODriveError::ODRIVE_ERROR_NONE) {
+        if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_INITIALIZING) == ODriveError::ODRIVE_ERROR_INITIALIZING) {
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_INITIALIZING", node_id_);
+        }
+        if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_SYSTEM_LEVEL) == ODriveError::ODRIVE_ERROR_SYSTEM_LEVEL) {
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_SYSTEM_LEVEL", node_id_);
+        }
+        if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_TIMING_ERROR) == ODriveError::ODRIVE_ERROR_TIMING_ERROR) {
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_TIMING_ERROR", node_id_);
+        }
+        if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_MISSING_ESTIMATE) == ODriveError::ODRIVE_ERROR_MISSING_ESTIMATE) {
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_MISSING_ESTIMATE", node_id_);
+        }
+        if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_BAD_CONFIG) == ODriveError::ODRIVE_ERROR_BAD_CONFIG) {
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_BAD_CONFIG", node_id_);
+        }
+        if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_DRV_FAULT) == ODriveError::ODRIVE_ERROR_DRV_FAULT) {
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_DRV_FAULT", node_id_);
+        }
+        if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_MISSING_INPUT) == ODriveError::ODRIVE_ERROR_MISSING_INPUT) {
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_MISSING_INPUT", node_id_);
+        }
+        if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_DC_BUS_OVER_VOLTAGE) == ODriveError::ODRIVE_ERROR_DC_BUS_OVER_VOLTAGE) {
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_DC_BUS_OVER_VOLTAGE", node_id_);
+        }
+        if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_DC_BUS_UNDER_VOLTAGE) == ODriveError::ODRIVE_ERROR_DC_BUS_UNDER_VOLTAGE) {
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_DC_BUS_UNDER_VOLTAGE", node_id_);
+        }
+        if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_DC_BUS_OVER_CURRENT) == ODriveError::ODRIVE_ERROR_DC_BUS_OVER_CURRENT) {
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_DC_BUS_OVER_CURRENT", node_id_);
+        }
+        if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_DC_BUS_OVER_REGEN_CURRENT) == ODriveError::ODRIVE_ERROR_DC_BUS_OVER_REGEN_CURRENT) {
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_DC_BUS_OVER_REGEN_CURRENT", node_id_);
+        }
+        if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_CURRENT_LIMIT_VIOLATION) == ODriveError::ODRIVE_ERROR_CURRENT_LIMIT_VIOLATION) {
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_CURRENT_LIMIT_VIOLATION", node_id_);
+        }
+        if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_MOTOR_OVER_TEMP) == ODriveError::ODRIVE_ERROR_MOTOR_OVER_TEMP) {
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_MOTOR_OVER_TEMP", node_id_);
+        }
+        if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_INVERTER_OVER_TEMP) == ODriveError::ODRIVE_ERROR_INVERTER_OVER_TEMP) {
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_INVERTER_OVER_TEMP", node_id_);
+        }
+        if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_VELOCITY_LIMIT_VIOLATION) == ODriveError::ODRIVE_ERROR_VELOCITY_LIMIT_VIOLATION) {
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_VELOCITY_LIMIT_VIOLATION", node_id_);
+        }
+        if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_POSITION_LIMIT_VIOLATION) == ODriveError::ODRIVE_ERROR_POSITION_LIMIT_VIOLATION) {
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_POSITION_LIMIT_VIOLATION", node_id_);
+        }
+        if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_WATCHDOG_TIMER_EXPIRED) == ODriveError::ODRIVE_ERROR_WATCHDOG_TIMER_EXPIRED) {
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_WATCHDOG_TIMER_EXPIRED", node_id_);
+        }
+        if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_ESTOP_REQUESTED) == ODriveError::ODRIVE_ERROR_ESTOP_REQUESTED) {
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_ESTOP_REQUESTED", node_id_);
+        }
+        if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_SPINOUT_DETECTED) == ODriveError::ODRIVE_ERROR_SPINOUT_DETECTED) {
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_SPINOUT_DETECTED", node_id_);
+        }
+        if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_BRAKE_RESISTOR_DISARMED) == ODriveError::ODRIVE_ERROR_BRAKE_RESISTOR_DISARMED) {
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_BRAKE_RESISTOR_DISARMED", node_id_);
+        }
+        if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_THERMISTOR_DISCONNECTED) == ODriveError::ODRIVE_ERROR_THERMISTOR_DISCONNECTED) {
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_THERMISTOR_DISCONNECTED", node_id_);
+        }
+        if (((uint32_t)(active_errors_) & ODriveError::ODRIVE_ERROR_CALIBRATION_ERROR) == ODriveError::ODRIVE_ERROR_CALIBRATION_ERROR) {
+            RCLCPP_ERROR_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, "ODrive %d error: ODRIVE_ERROR_CALIBRATION_ERROR", node_id_);
+        }
     }
 }
 

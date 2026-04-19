@@ -45,7 +45,7 @@ target_include_directories(odrive_controller_interface PUBLIC
 )
 target_link_libraries(odrive_controller_interface PUBLIC
   odrive_controller_interface_parameters
-  # controller_interface::controller_interface
+  controller_interface::controller_interface
   pluginlib::pluginlib
   rclcpp::rclcpp
   rclcpp_lifecycle::rclcpp_lifecycle
