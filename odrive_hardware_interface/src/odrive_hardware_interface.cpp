@@ -437,9 +437,13 @@ return_type BetterODriveHardwareInterface::perform_command_mode_switch(
                 control = ODriveControlMode::CONTROL_MODE_POSITION_CONTROL;
                 input = ODriveInputMode::INPUT_MODE_PASSTHROUGH;
             } else if (axis.vel_input_enabled_) {
-                RCLCPP_INFO(rclcpp::get_logger("BetterODriveHardwareInterface"), "Setting %s to velocity control", info_.joints[i].name.c_str());
-                control = ODriveControlMode::CONTROL_MODE_VELOCITY_CONTROL;
-                input = ODriveInputMode::INPUT_MODE_VEL_RAMP;
+                // We are bypassing the velocity to control in torque instead
+                RCLCPP_INFO(rclcpp::get_logger("BetterODriveHardwareInterface"), "Setting %s to torque control", info_.joints[i].name.c_str());
+                control = ODriveControlMode::CONTROL_MODE_TORQUE_CONTROL;
+                input = ODriveInputMode::INPUT_MODE_PASSTHROUGH;
+                // RCLCPP_INFO(rclcpp::get_logger("BetterODriveHardwareInterface"), "Setting %s to velocity control", info_.joints[i].name.c_str());
+                // control = ODriveControlMode::CONTROL_MODE_VELOCITY_CONTROL;
+                // input = ODriveInputMode::INPUT_MODE_VEL_RAMP;
             } else {
                 RCLCPP_INFO(rclcpp::get_logger("BetterODriveHardwareInterface"), "Setting %s to torque control", info_.joints[i].name.c_str());
                 control = ODriveControlMode::CONTROL_MODE_TORQUE_CONTROL;
@@ -521,10 +525,13 @@ return_type BetterODriveHardwareInterface::write(const rclcpp::Time& time, const
             float input_vel = axis.vel_setpoint_;
             float input_torque_ff = axis.torque_input_enabled_ ? axis.torque_setpoint_ : 0.0f;
             RCLCPP_INFO_STREAM_THROTTLE(rclcpp::get_logger("BetterODriveHardwareInterface"), clk, 1000, 
-                "Velocity for axis '" << axis.node_id_ << "' is: " << axis.vel_setpoint_);
+                "Torque for axis '" << axis.node_id_ << "' is: " << axis.vel_setpoint_);
             if (error_ok_to_clear(axis)) {
-                axis.send_input_vel(input_vel, input_torque_ff);
+                axis.send_input_torque(input_vel);
             }
+            // if (error_ok_to_clear(axis)) {
+            //     axis.send_input_vel(input_vel, input_torque_ff);
+            // }
         } else if (axis.torque_input_enabled_) {
             float input_torque = axis.torque_setpoint_;
             if (error_ok_to_clear(axis)) {
